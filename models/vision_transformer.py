@@ -84,7 +84,7 @@ class DropPath(nn.Module):
         return drop_path(x, self.drop_prob, self.training)
 
 
-class MLP(nn.Module):
+class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
         out_features = out_features or in_features
@@ -142,7 +142,7 @@ class Block(nn.Module):
             drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = MLP(in_features=dim, hidden_features=mlp_hidden_dim,
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim,
                        act_layer=act_layer, drop=drop)
 
         if init_values > 0:
@@ -170,20 +170,19 @@ class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
     """
 
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, out_dim=768):
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
         super().__init__()
         num_patches = (img_size // patch_size) * (img_size // patch_size)
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_patches = num_patches
 
-        self.proj = nn.Conv2d(in_chans, out_dim,
+        self.proj = nn.Conv2d(in_chans, embed_dim,
                               kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
         B, C, H, W = x.shape
-        x = self.proj(x).flatten(2).transpose(1, 2)
-        return x
+        return self.proj(x)
 
 
 class VisionTransformer(nn.Module):
