@@ -66,7 +66,6 @@ class MSiam(nn.Module):
         super(MSiam, self).__init__()
 
         self.encoder = encoder
-        self.encoder.fc = None
 
         dim_out = dim_in if args.out_dim is None else args.out_dim
         self.use_transformers = use_transformers
@@ -75,19 +74,16 @@ class MSiam(nn.Module):
         if self.use_transformers:
             # multi-crop wrapper handles forward with inputs of different resolutions
             if self.is_teacher:
-                self.proj = MultiCropWrapper(
-                    encoder,
-                    iBOTHead(
-                        dim_in,
-                        args.out_dim,
-                        patch_out_dim=args.patch_out_dim,
-                        norm=args.norm_in_head,
-                        act=args.act_in_head,
-                        shared_head=args.shared_head_teacher,
-                    ),
-                )
+                self.proj = iBOTHead(
+                    dim_in,
+                    args.out_dim,
+                    patch_out_dim=args.patch_out_dim,
+                    norm=args.norm_in_head,
+                    act=args.act_in_head,
+                    shared_head=args.shared_head_teacher,
+                ),
             else:
-                self.proj = MultiCropWrapper(encoder, iBOTHead(
+                self.proj = iBOTHead(
                     dim_in,
                     args.out_dim,
                     patch_out_dim=args.patch_out_dim,
@@ -95,8 +91,9 @@ class MSiam(nn.Module):
                     act=args.act_in_head,
                     norm_last_layer=args.norm_last_layer,
                     shared_head=args.shared_head,
-                ))
+                )
         else:
+            self.encoder.fc = None
             self.proj = nn.Sequential(
                 nn.Linear(dim_in, dim_out),
                 nn.BatchNorm1d(dim_out),
@@ -118,13 +115,31 @@ class MSiam(nn.Module):
 
         if self.use_transformers:
             # get cls and patch features
-            if self.is_teacher:
-                f_cls, f_patch = self.proj(x)
-            else:
-                f_cls, f_patch = self.proj(
-                    x, mask=masks)
+            # if self.is_teacher:
+            #     f_cls, f_patch = self.proj(x)
+            # else:
+            #     f_cls, f_patch = self.proj(
+            #         x, mask=masks)
 
-            return f_cls, f_patch
+            # return f_cls, f_patch
+            # if self.is_teacher:
+            #     f = self.encoder(x)
+            #     z, t_patches = self.proj(f)
+            #     return z, t_patches
+            # else:
+            #     f = self.encoder(x, mask=masks)
+            #     z = self.proj(f)
+            #     p, s_patches = self.pred(z)
+            #     return p, s_patches
+
+            if self.is_teacher:
+                f = self.encoder(x)
+                z = self.proj(f)
+                return z, None
+            else:
+                f = self.encoder(x, mask=masks)
+                p = self.proj(f)
+                return p, None
         else:
             f = self.encoder(x)
             z = self.proj(f)
@@ -140,6 +155,7 @@ class MSiamLoss(nn.Module):
                  center_momentum=0.9, center_momentum2=0.9, lambda1=1.0):
         super(MSiamLoss, self).__init__()
         self.use_patches = args.use_patches
+        self.use_transformers = 'deit' in args.backbone
         self.lamb_neg = lamb_neg
         self.lamb_patch = lamb_patch
         self.temp = temp
@@ -164,7 +180,7 @@ class MSiamLoss(nn.Module):
             np.linspace(args.warmup_teacher_patch_temp,
                         args.teacher_patch_temp, args.warmup_teacher_temp_epochs),
             np.ones(args.epochs - args.warmup_teacher_temp_epochs) *
-            args.teacher_temp2
+            args.teacher_patch_temp
         ))
 
     def forward(self, teacher_cls, student_cls, bsz,
@@ -177,7 +193,7 @@ class MSiamLoss(nn.Module):
         loss_neg = self.neg(teacher_cls)
         loss = loss_pos + self.lamb_neg * loss_neg
 
-        if self.use_patches:
+        if self.use_patches and self.use_transformers:
             # [CLS] and patch for global patches
             student_cls = student_cls / self.student_temp
             student_cls_c = student_cls.chunk(self.ngcrops)
@@ -194,7 +210,7 @@ class MSiamLoss(nn.Module):
                 (teacher_patch - self.center2) / temp2, dim=-1)
             teacher_patch_c = teacher_patch_c.detach().chunk(self.ngcrops)
 
-            loss_patch, n_patch_loss_terms = 0, 0
+            loss_patch, n_patch_loss_terms = 0.0, 0
             for q in range(len(teacher_cls_c)):
                 for v in range(len(student_cls_c)):
                     loss_p = torch.sum(-teacher_patch_c[q] * F.log_softmax(
@@ -209,7 +225,7 @@ class MSiamLoss(nn.Module):
             self.update_center(teacher_cls, teacher_patch)
             loss += self.lamb_patch * loss_patch
         else:
-            loss_patch = 0
+            loss_patch = 0.0
 
         std = self.std(teacher_cls)
 
