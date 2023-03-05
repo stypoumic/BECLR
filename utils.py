@@ -73,12 +73,12 @@ def build_student_teacher(args):
         student_encoder = model_dict[args.backbone](
             patch_size=args.patch_size,
             drop_path_rate=args.drop_path,
-            return_all_tokens=False,
+            return_all_tokens=True,
             masked_im_modeling=args.use_masked_im_modeling,
         )
         teacher_encoder = model_dict[args.backbone](
             patch_size=args.patch_size,
-            return_all_tokens=False,
+            return_all_tokens=True,
         )
         embed_dim = student_encoder.embed_dim
     else:
@@ -94,13 +94,15 @@ def build_student_teacher(args):
     # move networks to gpu
     student, teacher = student.cuda(), teacher.cuda()
     # synchronize batch norms (if any)
-    if has_batchnorms(student) and use_transformers:
-        student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
-        teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
+    # if has_batchnorms(student) and use_transformers:
+    #     student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
+    #     teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
 
-    # we need DDP wrapper to have synchro batch norms working...
-    # teacher = nn.parallel.DistributedDataParallel(teacher)
-    # student = nn.parallel.DistributedDataParallel(student)
+    # # we need DDP wrapper to have synchro batch norms working...
+    # if use_transformers:
+    #     student = nn.parallel.DistributedDataParallel(student)
+    #     teacher = nn.parallel.DistributedDataParallel(teacher)
+    # else:
     teacher = torch.nn.DataParallel(teacher)
     student = torch.nn.DataParallel(student)
 
