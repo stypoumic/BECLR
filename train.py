@@ -1,4 +1,16 @@
 from __future__ import print_function
+from torch.utils.tensorboard import SummaryWriter
+from models.msiam import MSiamLoss
+from utils import get_params_groups, get_world_size, clip_gradients, \
+    cancel_gradients_last_layer, build_fewshot_loader, build_model, build_student_teacher
+from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher
+from transform.build_transform import DataAugmentationMSiam
+from evaluate import evaluate_fewshot
+from dataset.mask_loader import ImageFolderMask
+import numpy as np
+from tqdm import tqdm
+from pathlib import Path
+import torch.backends.cudnn as cudnn
 
 import os
 import sys
@@ -7,23 +19,7 @@ import datetime
 import time
 
 import torch
-import torch.backends.cudnn as cudnn
-from pathlib import Path
-from tqdm import tqdm
-import numpy as np
-
-
-from dataset.mask_loader import ImageFolderMask
-from evaluate import evaluate_fewshot
-from transform.build_transform import DataAugmentationMSiam
-from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher
-
-from utils import get_params_groups, get_world_size, clip_gradients, \
-    cancel_gradients_last_layer, build_fewshot_loader, build_model, build_student_teacher
-
-from models.msiam import MSiamLoss
-
-from torch.utils.tensorboard import SummaryWriter
+torch.cuda.empty_cache()
 
 
 def args_parser():
@@ -356,10 +352,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
             masked_images = images
 
         with torch.cuda.amp.autocast(fp16_scaler is not None):
-            # loss, loss_pos, loss_neg, std = model(images)
-            # loss, loss_pos, loss_neg, std = model(
-            #     images, masked_images, masks, args)
-            if student.module.use_transformers:
+            if 'deit' in args.backbone:
                 student_cls, student_patches = student(images, masks)
                 teacher_cls, teacher_patches = teacher(images)
                 loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
