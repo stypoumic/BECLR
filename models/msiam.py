@@ -10,6 +10,24 @@ from .head import iBOTHead
 import numpy as np
 
 
+class CustomSequential(nn.Sequential):
+    bn_types = (nn.BatchNorm1d, nn.BatchNorm2d,
+                nn.BatchNorm3d, nn.SyncBatchNorm)
+
+    def forward(self, input):
+        for module in self:
+            dim = len(input.shape)
+            if isinstance(module, self.bn_types) and dim > 2:
+                perm = list(range(dim - 1))
+                perm.insert(1, dim - 1)
+                inv_perm = list(range(dim)) + [1]
+                inv_perm.pop(1)
+                input = module(input.permute(*perm)).permute(*inv_perm)
+            else:
+                input = module(input)
+        return input
+
+
 class MultiCropWrapper(nn.Module):
     """
     Perform forward pass separately on each resolution input.
@@ -72,26 +90,42 @@ class MSiam(nn.Module):
         self.is_teacher = is_teacher
 
         if self.use_transformers:
-            # multi-crop wrapper handles forward with inputs of different resolutions
-            if self.is_teacher:
-                self.proj = iBOTHead(
-                    dim_in,
-                    args.out_dim,
-                    patch_out_dim=args.patch_out_dim,
-                    norm=args.norm_in_head,
-                    act=args.act_in_head,
-                    shared_head=args.shared_head_teacher,
-                ),
-            else:
-                self.proj = iBOTHead(
-                    dim_in,
-                    args.out_dim,
-                    patch_out_dim=args.patch_out_dim,
-                    norm=args.norm_in_head,
-                    act=args.act_in_head,
-                    norm_last_layer=args.norm_last_layer,
-                    shared_head=args.shared_head,
-                )
+            self.proj = CustomSequential(
+                nn.Linear(dim_in, dim_out),
+                nn.BatchNorm1d(dim_out),
+                nn.ReLU(inplace=True),
+                nn.Linear(dim_out, dim_out),
+                nn.BatchNorm1d(dim_out),
+                nn.ReLU(inplace=True),
+                nn.Linear(dim_out, dim_out),
+                nn.BatchNorm1d(dim_out),
+            )
+            self.pred = CustomSequential(
+                nn.Linear(dim_out, dim_out//4),
+                nn.BatchNorm1d(dim_out//4),
+                nn.ReLU(inplace=True),
+                nn.Linear(dim_out//4, dim_out)
+            )
+            # # # multi-crop wrapper handles forward with inputs of different resolutions
+            # if self.is_teacher:
+            #     self.proj = iBOTHead(
+            #         dim_in,
+            #         args.out_dim,
+            #         patch_out_dim=args.patch_out_dim,
+            #         norm=args.norm_in_head,
+            #         act=args.act_in_head,
+            #         shared_head=args.shared_head_teacher,
+            #     )
+            # else:
+            #     self.proj = iBOTHead(
+            #         dim_in,
+            #         args.out_dim,
+            #         patch_out_dim=args.patch_out_dim,
+            #         norm=args.norm_in_head,
+            #         act=args.act_in_head,
+            #         norm_last_layer=args.norm_last_layer,
+            #         shared_head=args.shared_head,
+            #     )
         else:
             self.encoder.fc = None
             self.proj = nn.Sequential(
@@ -114,32 +148,36 @@ class MSiam(nn.Module):
     def forward(self, x, masks=None):
 
         if self.use_transformers:
-            # get cls and patch features
-            # if self.is_teacher:
-            #     f_cls, f_patch = self.proj(x)
-            # else:
-            #     f_cls, f_patch = self.proj(
-            #         x, mask=masks)
-
-            # return f_cls, f_patch
-            # if self.is_teacher:
-            #     f = self.encoder(x)
-            #     z, t_patches = self.proj(f)
-            #     return z, t_patches
-            # else:
-            #     f = self.encoder(x, mask=masks)
-            #     z = self.proj(f)
-            #     p, s_patches = self.pred(z)
-            #     return p, s_patches
-
             if self.is_teacher:
-                f = self.encoder(x)
-                z = self.proj(f)
-                return z, None
+                teacher_out = self.encoder(x)
+                # f_cls = teacher_out[:, 0]
+                # f_patch = teacher_out[:, 1:]
+                # z = self.proj(f_cls)
+                # f_patch = self.proj(f_patch)
+                #############################
+                teacher_out = self.proj(teacher_out)
+                f_cls = teacher_out[:, 0]
+                f_patch = teacher_out[:, 1:]
+                #############################
+                # z, f_patch = self.proj(teacher_out)
+                return f_cls, f_patch
             else:
-                f = self.encoder(x, mask=masks)
-                p = self.proj(f)
-                return p, None
+                student_out = self.encoder(x, mask=masks)
+                # ---------UniHead no patches
+                # f_cls = student_out[:, 0]
+                # f_patch = student_out[:, 1:]
+                # print(f_cls.size())                 #BS x dim_in
+                # print(f_patch.size())               #BS x 196 x dim_in
+                # p = self.pred(self.proj(f_cls))
+                # f_patch = self.pred(self.proj(f_patch))
+                #############################
+                # ---------UniHead patches
+                student_out = self.pred(self.proj(student_out))
+                f_cls = student_out[:, 0]
+                f_patch = student_out[:, 1:]
+                ############################
+                # p, f_patch = self.proj(student_out)
+                return f_cls, f_patch
         else:
             f = self.encoder(x)
             z = self.proj(f)
@@ -190,7 +228,13 @@ class MSiamLoss(nn.Module):
         p1, p2 = torch.split(student_cls, [bsz, bsz], dim=0)
 
         loss_pos = (self.pos(p1, z2)+self.pos(p2, z1))/2
-        loss_neg = self.neg(teacher_cls)
+
+        if self.use_transformers:
+            loss_neg = self.neg(
+                torch.cat((torch.unsqueeze(teacher_cls, 1), teacher_patch), dim=1))
+        else:
+            loss_neg = self.neg(teacher_cls)
+
         loss = loss_pos + self.lamb_neg * loss_neg
 
         if self.use_patches and self.use_transformers:
@@ -247,7 +291,12 @@ class MSiamLoss(nn.Module):
         z = F.normalize(z, dim=-1)
         mask = 1-torch.eye(batch_size, dtype=z.dtype,
                            device=z.device).repeat(2, 2)
-        out = torch.matmul(z, z.T) * mask
+        if self.use_transformers:
+            z1 = z.permute(1, 0, 2)
+            z2 = z.permute(1, 2, 0)
+            out = torch.matmul(z1, z2) * mask
+        else:
+            out = torch.matmul(z, z.T) * mask
         return (out.div(self.temp).exp().sum(1)-2).div(n_neg).mean().log()
 
     @torch.no_grad()
