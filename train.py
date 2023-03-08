@@ -2,7 +2,7 @@ from __future__ import print_function
 from torch.utils.tensorboard import SummaryWriter
 from models.msiam import MSiamLoss
 from utils import get_params_groups, get_world_size, clip_gradients, \
-    cancel_gradients_last_layer, build_fewshot_loader, build_model, build_student_teacher
+    cancel_gradients_last_layer, build_fewshot_loader, load_distil_model, build_student_teacher
 from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher
 from transform.build_transform import DataAugmentationMSiam
 from evaluate import evaluate_fewshot
@@ -190,12 +190,14 @@ def train_msiam(args):
     # model = build_model(args)
     student, teacher = build_student_teacher(args)
 
+    distil_model = load_distil_model(args) if args.dist else None
+
     # ============ preparing loss ... ============
     msiam_loss = MSiamLoss(args, lamb_neg=args.lamb_neg,
                            lamb_patch=args.lamb_patch,
                            temp=args.temp).cuda()
 
-    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_P-{}".format(
+    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_P-{}_SN".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim, args.momentum_teacher, args.use_patches))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
@@ -256,7 +258,7 @@ def train_msiam(args):
         # ============ training one epoch of MSiam ... ============
         loss = train_one_epoch(data_loader, student, teacher, optimizer, fp16_scaler, epoch,
                                lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss,
-                               args)
+                               args, distil_model)
         time2 = time.time()
 
         print('epoch {}, total time {:.2f}'.format(epoch+1, time2 - time1))
@@ -293,7 +295,8 @@ def train_msiam(args):
 
 
 def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoch,
-                    lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss, args):
+                    lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss,
+                    args, distil_model=None):
     """one epoch training"""
     student.train()
 
@@ -351,19 +354,34 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
         else:
             masked_images = images
 
-        with torch.cuda.amp.autocast(fp16_scaler is not None):
-            if 'deit' in args.backbone:
-                student_cls, student_patches = student(images, masks)
-                teacher_cls, teacher_patches = teacher(images)
-                loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
-                    teacher_cls, student_cls, args.batch_size, teacher_patches,
-                    student_patches, masks, epoch)
+        if distil_model is not None:
+            with torch.no_grad():
+                # could also give unmasked images as input to teacher
+                z_dist = distil_model.proj(
+                    distil_model.encoder(masked_images)).detach()
+                with torch.cuda.amp.autocast(fp16_scaler is not None):
+                    if 'deit' in args.backbone:
+                        pass
+                    else:
+                        p, z_student, p_dist = student(masked_images)
+                        z = teacher(images)
+                        loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
+                            z, p, z_student, args.batch_size, p_dist, z_dist)
+        else:
+            with torch.cuda.amp.autocast(fp16_scaler is not None):
+                if 'deit' in args.backbone:
+                    student_cls, student_patches, z_student = student(
+                        images, masks)
+                    teacher_cls, teacher_patches = teacher(images)
+                    loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
+                        teacher_cls, student_cls, z_student, args.batch_size, teacher_patches,
+                        student_patches, masks, epoch)
 
-            else:
-                p = student(masked_images)
-                z = teacher(images)
-                loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
-                    z, p, args.batch_size)
+                else:
+                    p, z_student = student(masked_images)
+                    z = teacher(images)
+                    loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
+                        z, p, z_student, args.batch_size)
 
         # student update
         optimizer.zero_grad()
@@ -445,6 +463,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     args.split_path = (Path(__file__).parent).joinpath('split')
+    args.dist = args.teacher_path is not None
 
     Path(args.save_path).mkdir(parents=True, exist_ok=True)
     train_msiam(args)
