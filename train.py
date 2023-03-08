@@ -45,9 +45,9 @@ def args_parser():
     parser.add_argument('--ckpt_path', type=str,
                         default=None, help='path to model checkpoint')
     ######
-    parser.add_argument('--out_dim', default=8192, type=int, help="""Dimensionality of
+    parser.add_argument('--out_dim', default=512, type=int, help="""Dimensionality of
         output for [CLS] token.""")
-    parser.add_argument('--patch_out_dim', default=8192, type=int, help="""Dimensionality of
+    parser.add_argument('--patch_out_dim', default=512, type=int, help="""Dimensionality of
         output for patch tokens.""")
     parser.add_argument('--shared_head', default=False, type=bool_flag, help="""Wether to share 
         the same head for [CLS] token output and patch tokens output. When set to false, patch_out_dim
@@ -357,16 +357,15 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
         if distil_model is not None:
             with torch.no_grad():
                 # could also give unmasked images as input to teacher
-                z_dist = distil_model.proj(
-                    distil_model.encoder(masked_images)).detach()
-                with torch.cuda.amp.autocast(fp16_scaler is not None):
-                    if 'deit' in args.backbone:
-                        pass
-                    else:
-                        p, z_student, p_dist = student(masked_images)
-                        z = teacher(images)
-                        loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
-                            z, p, z_student, args.batch_size, p_dist, z_dist)
+                z_dist = distil_model(masked_images).detach()
+            with torch.cuda.amp.autocast(fp16_scaler is not None):
+                if 'deit' in args.backbone:
+                    pass
+                else:
+                    p, z_student, p_dist = student(masked_images)
+                    z = teacher(images)
+                    loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
+                        z, p, z_student, args.batch_size, p_dist=p_dist, z_dist=z_dist)
         else:
             with torch.cuda.amp.autocast(fp16_scaler is not None):
                 if 'deit' in args.backbone:

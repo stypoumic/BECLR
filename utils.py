@@ -61,17 +61,23 @@ def has_batchnorms(model):
             return True
     return False
 
+
 def load_distil_model(args):
     use_transformers = True if 'deit' in args.backbone else False
 
+    checkpoint = torch.load(args.teacher_path)
+
     model_encoder = resnet50()
     embed_dim = model_encoder.out_dim
+    # args.dist = False
     model = MSiam(encoder=model_encoder, dim_in=embed_dim, args=args,
-                    use_transformers=use_transformers, is_teacher=False)
+                  use_transformers=use_transformers, is_teacher=True)
+    # args.dist = True
+
     model = model.cuda()
     model = torch.nn.DataParallel(model)
 
-    msg = model.load_state_dict(torch.load(args.teacher_path)['student'])
+    msg = model.load_state_dict(checkpoint['student'])
     print(f'load teacher model from: {args.teacher_path}, {msg}')
     model.eval()
     return model

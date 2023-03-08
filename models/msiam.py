@@ -261,7 +261,6 @@ class MSiamLoss(nn.Module):
             loss_dist = self.pos(p_dist, z_dist)
             loss = 0.5 * loss + 0.5 * loss_dist
 
-
         if self.use_patches and self.use_transformers:
             # [CLS] and patch for global patches
             student_cls = student_cls / self.student_temp
