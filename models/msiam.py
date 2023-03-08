@@ -88,9 +88,11 @@ class MSiam(nn.Module):
         dim_out = dim_in if args.out_dim is None else args.out_dim
         self.use_transformers = use_transformers
         self.is_teacher = is_teacher
+        self.dist = args.dist
 
         if self.use_transformers:
-            self.proj = CustomSequential(
+            # CustomSequential
+            self.proj = nn.Sequential(
                 nn.Linear(dim_in, dim_out),
                 nn.BatchNorm1d(dim_out),
                 nn.ReLU(inplace=True),
@@ -100,7 +102,7 @@ class MSiam(nn.Module):
                 nn.Linear(dim_out, dim_out),
                 nn.BatchNorm1d(dim_out),
             )
-            self.pred = CustomSequential(
+            self.pred = nn.Sequential(
                 nn.Linear(dim_out, dim_out//4),
                 nn.BatchNorm1d(dim_out//4),
                 nn.ReLU(inplace=True),
@@ -144,46 +146,63 @@ class MSiam(nn.Module):
                 nn.ReLU(inplace=True),
                 nn.Linear(dim_out//4, dim_out)
             )
+            if self.dist:
+                self.pred_dist = nn.Sequential(
+                    nn.Linear(dim_in, dim_out),
+                    nn.BatchNorm1d(dim_out),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(dim_out, dim_out),
+                    nn.BatchNorm1d(dim_out),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(dim_out, dim_out),
+                    nn.BatchNorm1d(dim_out),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(dim_out, dim_out//4),
+                    nn.BatchNorm1d(dim_out//4),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(dim_out//4, dim_out)
+                )
 
     def forward(self, x, masks=None):
 
         if self.use_transformers:
             if self.is_teacher:
                 teacher_out = self.encoder(x)
-                # f_cls = teacher_out[:, 0]
-                # f_patch = teacher_out[:, 1:]
-                # z = self.proj(f_cls)
-                # f_patch = self.proj(f_patch)
-                #############################
-                teacher_out = self.proj(teacher_out)
                 f_cls = teacher_out[:, 0]
                 f_patch = teacher_out[:, 1:]
+                z = self.proj(f_cls)
+                #############################
+                # teacher_out = self.proj(teacher_out)
+                # z = teacher_out[:, 0]
+                # f_patch = teacher_out[:, 1:]
                 #############################
                 # z, f_patch = self.proj(teacher_out)
-                return f_cls, f_patch
+                return z, f_patch
             else:
                 student_out = self.encoder(x, mask=masks)
                 # ---------UniHead no patches
-                # f_cls = student_out[:, 0]
-                # f_patch = student_out[:, 1:]
-                # print(f_cls.size())                 #BS x dim_in
-                # print(f_patch.size())               #BS x 196 x dim_in
-                # p = self.pred(self.proj(f_cls))
-                # f_patch = self.pred(self.proj(f_patch))
-                #############################
-                # ---------UniHead patches
-                student_out = self.pred(self.proj(student_out))
                 f_cls = student_out[:, 0]
                 f_patch = student_out[:, 1:]
+                z = self.proj(f_cls)
+                p = self.pred(z)
+                #############################
+                # ---------UniHead patches
+                # student_out = self.pred(self.proj(student_out))
+                # p = student_out[:, 0]
+                # f_patch = student_out[:, 1:]
                 ############################
+                # ---------iBoT head
                 # p, f_patch = self.proj(student_out)
-                return f_cls, f_patch
+                return p, f_patch, z
         else:
             f = self.encoder(x)
             z = self.proj(f)
             if not self.is_teacher:
                 p = self.pred(z)
-                return p
+                if self.dist:
+                    p_dist = self.pred_dist(f)
+                    return p, z, p_dist
+                return p, z
             return z
 
 
@@ -221,21 +240,27 @@ class MSiamLoss(nn.Module):
             args.teacher_patch_temp
         ))
 
-    def forward(self, teacher_cls, student_cls, bsz,
+    def forward(self, teacher_cls, student_cls, student_z, bsz,
                 teacher_patch=None, student_patch=None, student_mask=None,
-                epoch=None):
+                epoch=None, p_dist=None, z_dist=None):
         z1, z2 = torch.split(teacher_cls, [bsz, bsz], dim=0)
         p1, p2 = torch.split(student_cls, [bsz, bsz], dim=0)
 
         loss_pos = (self.pos(p1, z2)+self.pos(p2, z1))/2
 
-        if self.use_transformers:
-            loss_neg = self.neg(
-                torch.cat((torch.unsqueeze(teacher_cls, 1), teacher_patch), dim=1))
-        else:
-            loss_neg = self.neg(teacher_cls)
+        # if self.use_transformers:
+        #     loss_neg = self.neg(
+        #         torch.cat((torch.unsqueeze(teacher_cls, 1), teacher_patch), dim=1))
+        # else:
+        # changed to student (teacher_cls)
+        loss_neg = self.neg(student_z)
 
         loss = loss_pos + self.lamb_neg * loss_neg
+
+        if z_dist is not None:
+            loss_dist = self.pos(p_dist, z_dist)
+            loss = 0.5 * loss + 0.5 * loss_dist
+
 
         if self.use_patches and self.use_transformers:
             # [CLS] and patch for global patches
@@ -291,12 +316,12 @@ class MSiamLoss(nn.Module):
         z = F.normalize(z, dim=-1)
         mask = 1-torch.eye(batch_size, dtype=z.dtype,
                            device=z.device).repeat(2, 2)
-        if self.use_transformers:
-            z1 = z.permute(1, 0, 2)
-            z2 = z.permute(1, 2, 0)
-            out = torch.matmul(z1, z2) * mask
-        else:
-            out = torch.matmul(z, z.T) * mask
+        # if self.use_transformers:
+        #     z1 = z.permute(1, 0, 2)
+        #     z2 = z.permute(1, 2, 0)
+        #     out = torch.matmul(z1, z2) * mask
+        # else:
+        out = torch.matmul(z, z.T) * mask
         return (out.div(self.temp).exp().sum(1)-2).div(n_neg).mean().log()
 
     @torch.no_grad()
