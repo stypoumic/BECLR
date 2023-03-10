@@ -69,10 +69,10 @@ def load_distil_model(args):
 
     model_encoder = resnet50()
     embed_dim = model_encoder.out_dim
-    # args.dist = False
+    args.dist = False
     model = MSiam(encoder=model_encoder, dim_in=embed_dim, args=args,
                   use_transformers=use_transformers, is_teacher=True)
-    # args.dist = True
+    args.dist = True
 
     model = model.cuda()
     model = torch.nn.DataParallel(model)

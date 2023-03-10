@@ -197,8 +197,8 @@ def train_msiam(args):
                            lamb_patch=args.lamb_patch,
                            temp=args.temp).cuda()
 
-    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_P-{}_SN".format(
-        args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim, args.momentum_teacher, args.use_patches))
+    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}".format(
+        args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim, args.momentum_teacher, args.dist, args.use_fp16))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
     writer = SummaryWriter(log_dir=local_runs)
@@ -271,7 +271,7 @@ def train_msiam(args):
                                  optimizer, batch_size, save_file, fp16_scaler=fp16)
 
         # evaluate test performance every 50 epochs
-        if (epoch+1) % args.eval_freq == 0:
+        if (epoch) % args.eval_freq == 0:
             student.module.encoder.masked_im_modeling = False
             results = evaluate_fewshot(student.module.encoder, student.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
                 1, 5], n_query=args.n_query, classifier='LR', power_norm=True)
