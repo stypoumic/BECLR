@@ -215,5 +215,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     args.split_path = (Path(__file__).parent).joinpath('split')
+    args.dist = False
 
     evaluate_msiam(args)

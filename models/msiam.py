@@ -252,8 +252,8 @@ class MSiamLoss(nn.Module):
         #     loss_neg = self.neg(
         #         torch.cat((torch.unsqueeze(teacher_cls, 1), teacher_patch), dim=1))
         # else:
-        # changed to student (teacher_cls)
-        loss_neg = self.neg(student_z)
+        # changed to student (student_z)
+        loss_neg = self.neg(teacher_cls)
 
         loss = loss_pos + self.lamb_neg * loss_neg
 
