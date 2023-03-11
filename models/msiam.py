@@ -295,6 +295,7 @@ class MSiam(nn.Module):
 
                 return p, p_refined
             else:
+                f = torch.flatten(f, 1)
                 z = self.proj(f)
             return z
 
