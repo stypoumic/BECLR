@@ -44,6 +44,8 @@ def args_parser():
                         default=10, help='checkpoint frequency')
     parser.add_argument('--ckpt_path', type=str,
                         default=None, help='path to model checkpoint')
+    parser.add_argument('--use_feature_align', default=False, type=bool_flag,
+                        help="Whether to use feature alignment")
     ######
     parser.add_argument('--out_dim', default=512, type=int, help="""Dimensionality of
         output for [CLS] token.""")
@@ -362,10 +364,10 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                 if 'deit' in args.backbone:
                     pass
                 else:
-                    p, z_student, p_dist = student(masked_images)
+                    p, p_refined, p_dist = student(masked_images)
                     z = teacher(images)
                     loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
-                        z, p, z_student, args.batch_size, p_dist=p_dist, z_dist=z_dist)
+                        z, p, args.batch_size, p_refined=p_refined, p_dist=p_dist, z_dist=z_dist)
         else:
             with torch.cuda.amp.autocast(fp16_scaler is not None):
                 if 'deit' in args.backbone:
@@ -373,14 +375,14 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                         images, masks)
                     teacher_cls, teacher_patches = teacher(images)
                     loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
-                        teacher_cls, student_cls, z_student, args.batch_size, teacher_patches,
+                        teacher_cls, student_cls, args.batch_size, teacher_patches,
                         student_patches, masks, epoch)
 
                 else:
-                    p, z_student = student(masked_images)
+                    p, p_refined = student(masked_images)
                     z = teacher(images)
                     loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
-                        z, p, z_student, args.batch_size)
+                        z, p, args.batch_size, p_refined=p_refined)
 
         # student update
         optimizer.zero_grad()
