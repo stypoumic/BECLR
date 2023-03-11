@@ -79,6 +79,81 @@ class MultiCropWrapper(nn.Module):
         return output_
 
 
+class AttFex(nn.Module):
+    def __init__(self, args, wm_channels=64, wn_channels=32):
+        super(AttFex, self).__init__()
+        # ('--wm-channels', type=int, default=64)
+        # ('--wn-channels', type=int, default=32)
+
+        act_fn = nn.LeakyReLU(0.2)
+
+        ## AttFEX Module ##
+        # 1x1 Convs representing M(.), N(.)
+        # self.n = args.n_ways * (args.k_shots + args.q_shots)  # BS x 2
+        self.n = args.batch_size * 2
+        self.fe = nn.Sequential(
+            nn.Conv2d(in_channels=1, out_channels=wm_channels, kernel_size=(  # 64 --> args.wm
+                self.n, 1), stride=(1, 1), padding='valid', bias=False),
+            act_fn,
+
+            nn.Conv2d(in_channels=wm_channels, out_channels=wn_channels, kernel_size=(  # 64 --> args.wm, 32 --> args.wn
+                1, 1), stride=(1, 1), padding='valid', bias=False),
+            act_fn)
+
+        # Query, Key and Value extractors as 1x1 Convs
+        self.f_q = nn.Conv2d(in_channels=wn_channels, out_channels=1, kernel_size=(  # 32 --> args.wn
+            1, 1), stride=(1, 1), padding='valid', bias=False)
+        self.f_k = nn.Conv2d(in_channels=wn_channels, out_channels=1, kernel_size=(  # 32 --> args.wn
+            1, 1), stride=(1, 1), padding='valid', bias=False)
+        self.f_v = nn.Conv2d(in_channels=wn_channels, out_channels=1, kernel_size=(  # 32 --> args.wn
+            1, 1), stride=(1, 1), padding='valid', bias=False)
+
+    def forward(self, x):
+
+        # Task aware embeddings using AttFEX
+        G = x.permute(2, 3, 0, 1)
+        G = G.reshape(G.shape[0] * G.shape[1],
+                      G.shape[2], G.shape[3]).unsqueeze(dim=1)
+
+        G = self.fe(G)
+
+        # if (self.args.dataset == 'miniimagenet' and self.args.k_shots == 5):
+        #     xq = self.f_q(G)
+        #     xq = nn.LeakyReLU(0.2)(xq)
+        #     xk = self.f_k(G)
+        #     xk = nn.LeakyReLU(0.2)(xk)
+        #     xv = self.f_v(G)
+        #     xv = nn.LeakyReLU(0.2)(xv)
+        # else:
+        xq = self.f_q(G)
+        xk = self.f_k(G)
+        xv = self.f_v(G)
+
+        xq = xq.squeeze(dim=1).squeeze(dim=1).transpose(
+            0, 1).reshape(-1, x.shape[2], x.shape[3])
+        xk = xk.squeeze(dim=1).squeeze(dim=1).transpose(
+            0, 1).reshape(-1, x.shape[2], x.shape[3])
+        xv = xv.squeeze(dim=1).squeeze(dim=1).transpose(
+            0, 1).reshape(-1, x.shape[2], x.shape[3])
+
+        # Attention Block
+        xq = xq.reshape(xq.shape[0], xq.shape[1]*xq.shape[2])
+        xk = xk.reshape(xk.shape[0], xk.shape[1]*xk.shape[2])
+        xv = xv.reshape(xv.shape[0], xv.shape[1]*xv.shape[2])
+
+        G = torch.mm(xq, xk.transpose(0, 1)/xk.shape[1]**0.5)
+        softmax = nn.Softmax(dim=-1)
+        G = softmax(G)
+        G = torch.mm(G, xv)
+
+        # Transductive Mask transformed input
+        G = G.reshape(-1, x.shape[2], x.shape[3])
+        x = x * G
+        x = nn.Flatten()(x)
+
+        return x
+
+
 class MSiam(nn.Module):
     def __init__(self, encoder, dim_in, args, use_transformers=False, is_teacher=False):
         super(MSiam, self).__init__()
@@ -87,8 +162,12 @@ class MSiam(nn.Module):
 
         dim_out = dim_in if args.out_dim is None else args.out_dim
         self.use_transformers = use_transformers
+        self.use_feature_align = args.use_feature_align
         self.is_teacher = is_teacher
         self.dist = args.dist
+
+        if self.use_feature_align:
+            self.feature_extractor = AttFex(args)
 
         if self.use_transformers:
             # CustomSequential
@@ -196,13 +275,27 @@ class MSiam(nn.Module):
                 return p, f_patch, z
         else:
             f = self.encoder(x)
-            z = self.proj(f)
+
             if not self.is_teacher:
+                if self.use_feature_align:
+                    # apply feature alignment
+                    f_refined = self.feature_extractor(f)
+                    z_refined = self.proj(f_refined)
+                    p_refined = self.pred(z_refined)
+                else:
+                    p_refined = None
+
+                f = torch.flatten(f, 1)
+                z = self.proj(f)
                 p = self.pred(z)
+                # apply self-distilliation
                 if self.dist:
                     p_dist = self.pred_dist(f)
-                    return p, z, p_dist
-                return p, z
+                    return p, p_refined, p_dist
+
+                return p, p_refined
+            else:
+                z = self.proj(f)
             return z
 
 
@@ -240,9 +333,9 @@ class MSiamLoss(nn.Module):
             args.teacher_patch_temp
         ))
 
-    def forward(self, teacher_cls, student_cls, student_z, bsz,
-                teacher_patch=None, student_patch=None, student_mask=None,
-                epoch=None, p_dist=None, z_dist=None):
+    def forward(self, teacher_cls, student_cls, bsz, teacher_patch=None,
+                student_patch=None, student_mask=None, epoch=None,
+                p_refined=None, p_dist=None, z_dist=None, w_ref=1.0, w_dist=0.5):
         z1, z2 = torch.split(teacher_cls, [bsz, bsz], dim=0)
         p1, p2 = torch.split(student_cls, [bsz, bsz], dim=0)
 
@@ -255,11 +348,21 @@ class MSiamLoss(nn.Module):
         # changed to student (student_z)
         loss_neg = self.neg(teacher_cls)
 
-        loss = loss_pos + self.lamb_neg * loss_neg
+        if p_refined is not None and w_ref > 0.0:
+            p1_refined, p2_refined = torch.split(p_refined, [bsz, bsz], dim=0)
+
+            loss_pos_ref = (self.pos(p1_refined, z2) +
+                            self.pos(p2_refined, z1))/2
+
+            loss = (loss_pos + loss_pos_ref * w_ref) / (1 + w_ref)
+        else:
+            loss = loss_pos
+
+        loss = loss + self.lamb_neg * loss_neg
 
         if z_dist is not None:
             loss_dist = self.pos(p_dist, z_dist)
-            loss = 0.5 * loss + 0.5 * loss_dist
+            loss = w_dist * loss + w_dist * loss_dist
 
         if self.use_patches and self.use_transformers:
             # [CLS] and patch for global patches
