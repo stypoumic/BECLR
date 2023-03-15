@@ -90,15 +90,27 @@ class AttFex(nn.Module):
         ## AttFEX Module ##
         # 1x1 Convs representing M(.), N(.)
         # self.n = args.n_ways * (args.k_shots + args.q_shots)  # BS x 2
-        self.n = args.batch_size * 2
+        # self.n = args.batch_size * 2
+        # torch.cuda.device_count()
+        self.n = args.batch_size * 2 / torch.cuda.device_count()
+
         self.fe = nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=wm_channels, kernel_size=(  # 64 --> args.wm
-                self.n, 1), stride=(1, 1), padding='valid', bias=False),
+            nn.Conv2d(in_channels=self.n, out_channels=wm_channels, kernel_size=(  # 64 --> args.wm
+                1, 1), stride=(1, 1), padding='valid', bias=False),
             act_fn,
 
             nn.Conv2d(in_channels=wm_channels, out_channels=wn_channels, kernel_size=(  # 64 --> args.wm, 32 --> args.wn
                 1, 1), stride=(1, 1), padding='valid', bias=False),
             act_fn)
+
+        # self.fe = nn.Sequential(
+        #     nn.Conv2d(in_channels=1, out_channels=wm_channels, kernel_size=(  # 64 --> args.wm
+        #         self.n, 1), stride=(1, 1), padding='valid', bias=False),
+        #     act_fn,
+
+        #     nn.Conv2d(in_channels=wm_channels, out_channels=wn_channels, kernel_size=(  # 64 --> args.wm, 32 --> args.wn
+        #         1, 1), stride=(1, 1), padding='valid', bias=False),
+        #     act_fn)
 
         # Query, Key and Value extractors as 1x1 Convs
         self.f_q = nn.Conv2d(in_channels=wn_channels, out_channels=1, kernel_size=(  # 32 --> args.wn
@@ -111,9 +123,10 @@ class AttFex(nn.Module):
     def forward(self, x):
 
         # Task aware embeddings using AttFEX
-        G = x.permute(2, 3, 0, 1)
-        G = G.reshape(G.shape[0] * G.shape[1],
-                      G.shape[2], G.shape[3]).unsqueeze(dim=1)
+        # G = x.permute(2, 3, 0, 1)
+        # G = G.reshape(G.shape[0] * G.shape[1],
+        #               G.shape[2], G.shape[3]).unsqueeze(dim=1)
+        G = x.permute(1, 0, 2, 3)
 
         G = self.fe(G)
 
@@ -150,7 +163,6 @@ class AttFex(nn.Module):
         G = G.reshape(-1, x.shape[2], x.shape[3])
         x = x * G
         x = nn.Flatten()(x)
-
         return x
 
 
@@ -163,6 +175,7 @@ class MSiam(nn.Module):
         dim_out = dim_in if args.out_dim is None else args.out_dim
         self.use_transformers = use_transformers
         self.use_feature_align = args.use_feature_align
+        self.use_feature_align_teacher = args.use_feature_align_teacher
         self.is_teacher = is_teacher
         self.dist = args.dist
 
@@ -295,9 +308,15 @@ class MSiam(nn.Module):
 
                 return p, p_refined
             else:
+                if self.use_feature_align and self.use_feature_align_teacher:
+                    # apply feature alignment
+                    f_refined = self.feature_extractor(f)
+                    z_refined = self.proj(f_refined)
+                else:
+                    z_refined = None
                 f = torch.flatten(f, 1)
                 z = self.proj(f)
-            return z
+            return z, z_refined
 
 
 class MSiamLoss(nn.Module):
@@ -336,7 +355,7 @@ class MSiamLoss(nn.Module):
 
     def forward(self, teacher_cls, student_cls, bsz, teacher_patch=None,
                 student_patch=None, student_mask=None, epoch=None,
-                p_refined=None, p_dist=None, z_dist=None, w_ref=1.0, w_dist=0.5):
+                p_refined=None, z_refined=None, p_dist=None, z_dist=None, w_ori=1.0, w_dist=0.5):
         z1, z2 = torch.split(teacher_cls, [bsz, bsz], dim=0)
         p1, p2 = torch.split(student_cls, [bsz, bsz], dim=0)
 
@@ -346,16 +365,20 @@ class MSiamLoss(nn.Module):
         #     loss_neg = self.neg(
         #         torch.cat((torch.unsqueeze(teacher_cls, 1), teacher_patch), dim=1))
         # else:
-        # changed to student (student_z)
+        # changed to student (student_z)``
         loss_neg = self.neg(teacher_cls)
 
-        if p_refined is not None and w_ref > 0.0:
+        if p_refined is not None:
             p1_refined, p2_refined = torch.split(p_refined, [bsz, bsz], dim=0)
+            if z_refined is not None:
+                z1_refined, z2_refined = torch.split(z_refined, [bsz, bsz], dim=0)
+            else:
+                z1_refined, z2_refined = z1, z2
 
-            loss_pos_ref = (self.pos(p1_refined, z2) +
-                            self.pos(p2_refined, z1))/2
+            loss_pos_ref = (self.pos(p1_refined, z2_refined) +
+                            self.pos(p2_refined, z1_refined))/2
 
-            loss = (loss_pos + loss_pos_ref * w_ref) / (1 + w_ref)
+            loss = (loss_pos * w_ori + loss_pos_ref) / (1 + w_ori)
         else:
             loss = loss_pos
 

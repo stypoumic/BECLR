@@ -46,6 +46,10 @@ def args_parser():
                         default=None, help='path to model checkpoint')
     parser.add_argument('--use_feature_align', default=False, type=bool_flag,
                         help="Whether to use feature alignment")
+    parser.add_argument('--use_feature_align_teacher', default=False, type=bool_flag,
+                        help="Whether to use feature alignment on the teacher features")
+    parser.add_argument('--w_ori', type=float,
+                        default=1.0, help='weight of original features (in case of refinement)')
     ######
     parser.add_argument('--out_dim', default=512, type=int, help="""Dimensionality of
         output for [CLS] token.""")
@@ -143,7 +147,7 @@ def args_parser():
     parser.add_argument('--n_way', type=int, default=5, help='n_way')
     parser.add_argument('--n_query', type=int, default=15, help='n_query')
     parser.add_argument('--n_test_task', type=int,
-                        default=100, help='total test few-shot episodes')
+                        default=400, help='total test few-shot episodes')
     parser.add_argument('--test_batch_size', type=int,
                         default=5, help='episode_batch_size')
     parser.add_argument('--eval_freq', type=int,
@@ -199,8 +203,10 @@ def train_msiam(args):
                            lamb_patch=args.lamb_patch,
                            temp=args.temp).cuda()
 
-    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}".format(
-        args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim, args.momentum_teacher, args.dist, args.use_fp16))
+    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_FA_{}_w_{}_T_{}".format(
+        args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
+        args.momentum_teacher, args.dist, args.use_fp16, args.use_feature_align,
+        args.w_ori, args.use_feature_align_teacher))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
     writer = SummaryWriter(log_dir=local_runs)
@@ -273,7 +279,7 @@ def train_msiam(args):
                                  optimizer, batch_size, save_file, fp16_scaler=fp16)
 
         # evaluate test performance every 50 epochs
-        if (epoch) % args.eval_freq == 0:
+        if (epoch) % args.eval_freq == 0 and epoch > 0:
             student.module.encoder.masked_im_modeling = False
             results = evaluate_fewshot(student.module.encoder, student.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
                 1, 5], n_query=args.n_query, classifier='LR', power_norm=True)
@@ -365,9 +371,14 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     pass
                 else:
                     p, p_refined, p_dist = student(masked_images)
-                    z = teacher(images)
+                    z, z_refined = teacher(images)
                     loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
-                        z, p, args.batch_size, p_refined=p_refined, p_dist=p_dist, z_dist=z_dist)
+                        z, p, args.batch_size,
+                        p_refined=p_refined,
+                        z_refined=z_refined,
+                        p_dist=p_dist,
+                        z_dist=z_dist,
+                        w_ori=args.w_ori)
         else:
             with torch.cuda.amp.autocast(fp16_scaler is not None):
                 if 'deit' in args.backbone:
@@ -380,9 +391,12 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
 
                 else:
                     p, p_refined = student(masked_images)
-                    z = teacher(images)
+                    z, z_refined = teacher(images)
                     loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
-                        z, p, args.batch_size, p_refined=p_refined)
+                        z, p, args.batch_size,
+                        p_refined=p_refined,
+                        z_refined=z_refined,
+                        w_ori=args.w_ori)
 
         # student update
         optimizer.zero_grad()
