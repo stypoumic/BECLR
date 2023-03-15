@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import argparse
+from torchvision.transforms.functional import normalize
 
 import numpy as np
 import math
@@ -110,19 +111,17 @@ def evaluate_fewshot(
             f = encoder(images)
         else:
             f = encoder(images)
-
-        # standarization
-        # scaler = preprocessing.StandardScaler().fit(f.cpu())
-        # f = torch.tensor(scaler.transform(f.cpu())).cuda()
+        # print(f.size())
+        # print(torch.mean(f, dim=1, keepdim=False).size())
+        # print("Befor Normalization: {}".format(torch.isnan(f).any()))
+        # print("Befor Normalization: {}".format(not torch.isfinite(f).any()))
 
         # mean normalization
-        f = (f - torch.mean(f, dim=-1, keepdim=True)) / \
-            torch.std(f, dim=-1, keepdim=True)
+        f = normalize(f, torch.mean(
+            f, dim=1, keepdim=True), torch.std(f, dim=1, keepdim=True), inplace=True)
 
-        # unisiam Norm
-        # f = f/f.norm(dim=-1, keepdim=True)
-        # if power_norm:
-        #     f = f ** 0.5
+        # print("After Normalization: {}".format(torch.isnan(f).any()))
+        # print("After Normalization: {}".format(not torch.isfinite(f).any()))
 
         max_n_shot = max(n_shots)
         test_batch_size = int(f.shape[0]/n_way/(n_query+max_n_shot))
@@ -189,17 +188,18 @@ def evaluate_msiam(args):
         #     student, teacher, args.eval_path, eval=True)
 
         student.load_state_dict(torch.load(args.eval_path)
-                                ['student'])
+                                ['student'], strict=True)
         teacher.load_state_dict(torch.load(args.eval_path)
-                                ['teacher'])
+                                ['teacher'], strict=True)
 
-        student.module.encoder.masked_im_modeling = False
+        if "deit" in args.backbone:
+            student.module.encoder.masked_im_modeling = False
 
         if args.use_student:
             model = student
         else:
             model = teacher
-        
+
         evaluate_fewshot(model.module.encoder, model.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
             1, 5], n_query=args.n_query, classifier='LR', power_norm=True)
 
@@ -214,6 +214,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     # need to change that
     args.use_feature_align = False
+    args.use_feature_align_teacher = False
     args.dist = True
 
     args.split_path = (Path(__file__).parent).joinpath('split')
