@@ -412,13 +412,11 @@ def load_model(model, optimizer, fp16_scaler, ckpt_path):
     return model, optimizer, fp16_scaler, epoch, loss, batch_size
 
 
-def load_student_teacher(student, teacher, ckpt_path, optimizer=None, fp16_scaler=None, eval=False):
+def load_student_teacher(student, teacher, ckpt_path, optimizer=None, fp16_scaler=None):
     print('==> Loading... \n')
     # open checkpoint file
 
     checkpoint = torch.load(ckpt_path)
-    if eval == True:
-        return student.load_state_dict(checkpoint['student']), teacher.load_state_dict(checkpoint['teacher'])
 
     epoch = checkpoint['epoch']
     loss = checkpoint['loss']
