@@ -92,7 +92,7 @@ class AttFex(nn.Module):
         # self.n = args.n_ways * (args.k_shots + args.q_shots)  # BS x 2
         # self.n = args.batch_size * 2
         # torch.cuda.device_count()
-        self.n = args.batch_size * 2 / torch.cuda.device_count()
+        self.n = int(args.batch_size * 2 / torch.cuda.device_count())
 
         self.fe = nn.Sequential(
             nn.Conv2d(in_channels=self.n, out_channels=wm_channels, kernel_size=(  # 64 --> args.wm
@@ -371,7 +371,8 @@ class MSiamLoss(nn.Module):
         if p_refined is not None:
             p1_refined, p2_refined = torch.split(p_refined, [bsz, bsz], dim=0)
             if z_refined is not None:
-                z1_refined, z2_refined = torch.split(z_refined, [bsz, bsz], dim=0)
+                z1_refined, z2_refined = torch.split(
+                    z_refined, [bsz, bsz], dim=0)
             else:
                 z1_refined, z2_refined = z1, z2
 
@@ -380,6 +381,7 @@ class MSiamLoss(nn.Module):
 
             loss = (loss_pos * w_ori + loss_pos_ref) / (1 + w_ori)
         else:
+            loss_pos_ref = 0.0
             loss = loss_pos
 
         loss = loss + self.lamb_neg * loss_neg
@@ -387,6 +389,8 @@ class MSiamLoss(nn.Module):
         if z_dist is not None:
             loss_dist = self.pos(p_dist, z_dist)
             loss = w_dist * loss + w_dist * loss_dist
+        else:
+            loss_dist = 0.0
 
         if self.use_patches and self.use_transformers:
             # [CLS] and patch for global patches
@@ -424,7 +428,17 @@ class MSiamLoss(nn.Module):
 
         std = self.std(teacher_cls)
 
-        return loss, loss_pos, loss_neg, loss_patch, std
+        loss_state = {
+            'loss': loss,
+            'loss_pos': loss_pos,
+            'loss_neg': loss_neg,
+            'loss_patch': loss_patch,
+            'loss_dist': loss_dist,
+            'loss_pos_ref': loss_pos_ref,
+            'std': std
+        }
+        return loss_state
+        # return loss, loss_pos, loss_neg, loss_patch, std
 
     @torch.no_grad()
     def std(self, z):

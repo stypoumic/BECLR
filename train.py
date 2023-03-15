@@ -314,6 +314,8 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
     loss_pos_hist = AverageMeter()
     loss_neg_hist = AverageMeter()
     loss_patch_hist = AverageMeter()
+    loss_dist_hist = AverageMeter()
+    loss_pos_ref_hist = AverageMeter()
     std_hist = AverageMeter()
 
     end = time.time()
@@ -372,7 +374,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                 else:
                     p, p_refined, p_dist = student(masked_images)
                     z, z_refined = teacher(images)
-                    loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
+                    loss_state = msiam_loss(
                         z, p, args.batch_size,
                         p_refined=p_refined,
                         z_refined=z_refined,
@@ -385,19 +387,20 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     student_cls, student_patches, z_student = student(
                         images, masks)
                     teacher_cls, teacher_patches = teacher(images)
-                    loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
+                    loss_state = msiam_loss(
                         teacher_cls, student_cls, args.batch_size, teacher_patches,
                         student_patches, masks, epoch)
 
                 else:
                     p, p_refined = student(masked_images)
                     z, z_refined = teacher(images)
-                    loss, loss_pos, loss_neg, loss_patch, std = msiam_loss(
+                    loss_state = msiam_loss(
                         z, p, args.batch_size,
                         p_refined=p_refined,
                         z_refined=z_refined,
                         w_ori=args.w_ori)
 
+        loss = loss_state['loss']
         # student update
         optimizer.zero_grad()
         param_norms = None
@@ -428,11 +431,15 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
 
         # logging
         loss_hist.update(loss.item(), bsz)
-        loss_pos_hist.update(loss_pos.item(), bsz)
-        loss_neg_hist.update(loss_neg.item(), bsz)
+        loss_pos_hist.update(loss_state["loss_pos"].item(), bsz)
+        loss_neg_hist.update(loss_state["loss_neg"].item(), bsz)
+        if args.dist:
+            loss_dist_hist.update(loss_state["loss_dist"].item(), bsz)
+        if args.use_feature_align:
+            loss_pos_ref_hist.update(loss_state["loss_pos_ref"].item(), bsz)
         if args.use_patches:
-            loss_patch_hist.update(loss_patch.item(), bsz)
-        std_hist.update(std.item(), bsz)
+            loss_patch_hist.update(loss_state["loss_patch"].item(), bsz)
+        std_hist.update(loss_state["std"].item(), bsz)
         # add evaluation logging every 50 epochs 100 episodes
         batch_time.update(time.time() - end)
         end = time.time()
@@ -445,10 +452,13 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                   'loss_pos {lossp.val:.3f} ({lossp.avg:.3f})\t'
                   'loss_neg {lossn.val:.3f} ({lossn.avg:.3f})\t'
                   'loss_patch {losspa.val:.3f} ({losspa.avg:.3f})\t'
+                  'loss_dist {lossdist.val:.3f} ({lossdist.avg:.3f})\t'
+                  'loss_pos_ref {losspref.val:.3f} ({losspref.avg:.3f})\t'
                   'std {std.val:.3f} ({std.avg:.3f})'.format(
                       epoch + 1, global_it + 1 - epoch * len(train_loader), len(train_loader), batch_time=batch_time,
                       data_time=data_time, loss=loss_hist, lossp=loss_pos_hist,
-                      lossn=loss_neg_hist, losspa=loss_patch_hist, std=std_hist))
+                      lossn=loss_neg_hist, losspa=loss_patch_hist, lossdist=loss_dist_hist,
+                      losspref=loss_pos_ref_hist, std=std_hist))
             sys.stdout.flush()
 
     # log weight gradients
@@ -461,6 +471,8 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
     writer.add_scalar("Alignment Loss", loss_pos_hist.avg, epoch+1)
     writer.add_scalar("Uniformity Loss", loss_neg_hist.avg, epoch+1)
     writer.add_scalar("Patch Loss", loss_patch_hist.avg, epoch+1)
+    writer.add_scalar("Self-Distillation Loss", loss_dist_hist.avg, epoch+1)
+    writer.add_scalar("Refined Alignment Loss", loss_pos_ref_hist.avg, epoch+1)
     writer.add_scalar("Standard Deviation", std_hist.avg, epoch+1)
     writer.add_scalar("Batch Time", batch_time.avg, epoch+1)
     writer.add_scalar("Data Time", data_time.avg, epoch+1)
