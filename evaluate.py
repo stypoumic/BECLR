@@ -13,7 +13,7 @@ from tqdm import tqdm
 from pathlib import Path
 import torch.backends.cudnn as cudnn
 
-from utils import build_fewshot_loader, bool_flag, build_model, build_student_teacher, load_student_teacher
+from utils import build_fewshot_loader, bool_flag, build_model, build_student_teacher
 
 
 def args_parser():
@@ -189,18 +189,17 @@ def evaluate_msiam(args):
         #     student, teacher, args.eval_path, eval=True)
 
         student.load_state_dict(torch.load(args.eval_path)
-                                ['student'], strict=True)
+                                ['student'])
         teacher.load_state_dict(torch.load(args.eval_path)
-                                ['teacher'], strict=True)
+                                ['teacher'])
 
-        if "deit" in args.backbone:
-            student.module.encoder.masked_im_modeling = False
+        student.module.encoder.masked_im_modeling = False
 
         if args.use_student:
             model = student
         else:
             model = teacher
-
+        
         evaluate_fewshot(model.module.encoder, model.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
             1, 5], n_query=args.n_query, classifier='LR', power_norm=True)
 
@@ -213,8 +212,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         'MSiam evaluation arguments', parents=[args_parser()])
     args = parser.parse_args()
+    # need to change that
+    args.use_feature_align = False
+    args.dist = True
 
     args.split_path = (Path(__file__).parent).joinpath('split')
-    args.dist = False
 
     evaluate_msiam(args)
