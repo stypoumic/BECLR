@@ -7,6 +7,8 @@ import torch.distributed as dist
 from torchvision import transforms
 from pathlib import Path
 import copy
+import os
+import sys
 from torch import nn
 
 from dataset.miniImageNet import miniImageNet
@@ -15,6 +17,35 @@ from dataset.sampler import EpisodeSampler
 
 from models.msiam import MSiam
 from models import resnet10, resnet18, resnet34, resnet50, vit_tiny
+
+
+def init_distributed_mode(args):
+    # launched with torch.distributed.launch
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        args.rank = int(os.environ["RANK"])
+        args.world_size = int(os.environ['WORLD_SIZE'])
+        args.gpu = int(os.environ['LOCAL_RANK'])
+    # launched with submitit on a slurm cluster
+    elif 'SLURM_PROCID' in os.environ:
+        args.rank = int(os.environ['SLURM_PROCID'])
+        args.gpu = args.rank % torch.cuda.device_count()
+    # launched naively with `python main_dino.py`
+    # we manually add MASTER_ADDR and MASTER_PORT to env variables
+    elif torch.cuda.is_available():
+        print('Will run the code on one GPU.')
+        args.rank, args.gpu, args.world_size = 0, 0, 1
+        os.environ['MASTER_ADDR'] = '127.0.0.1'
+        os.environ['MASTER_PORT'] = '29500'
+    else:
+        print('Does not support training without GPU.')
+        sys.exit(1)
+    # nccl
+    dist.init_process_group(
+        backend="gloo",
+        world_size=args.world_size,
+        rank=args.rank,
+    )
+    dist.barrier()
 
 
 class AverageMeter(object):
