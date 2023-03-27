@@ -3,7 +3,7 @@ from torch.utils.tensorboard import SummaryWriter
 from models.msiam import MSiamLoss
 from utils import get_params_groups, get_world_size, clip_gradients, \
     cancel_gradients_last_layer, build_fewshot_loader, load_distil_model, build_student_teacher
-from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher
+from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher, init_distributed_mode
 from transform.build_transform import DataAugmentationMSiam
 from evaluate import evaluate_fewshot
 from dataset.mask_loader import ImageFolderMask
@@ -367,7 +367,8 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
         if distil_model is not None:
             with torch.no_grad():
                 # could also give unmasked images as input to teacher
-                z_dist = distil_model(masked_images).detach()
+                z_dist, _ = distil_model(masked_images)
+                z_dist = z_dist.detach()
             with torch.cuda.amp.autocast(fp16_scaler is not None):
                 if 'deit' in args.backbone:
                     pass
@@ -394,6 +395,9 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                 else:
                     p, p_refined = student(masked_images)
                     z, z_refined = teacher(images)
+                    # replace teacher features with NN
+                    # z0 = self.nn_replacer(z0.detach(), update=False)
+                    # z1 = self.nn_replacer(z1.detach(), update=True)
                     loss_state = msiam_loss(
                         z, p, args.batch_size,
                         p_refined=p_refined,
@@ -491,6 +495,8 @@ if __name__ == '__main__':
 
     args.split_path = (Path(__file__).parent).joinpath('split')
     args.dist = args.teacher_path is not None
+    ##
+    # init_distributed_mode(args)
 
     Path(args.save_path).mkdir(parents=True, exist_ok=True)
     train_msiam(args)
