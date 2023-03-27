@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import torch.distributed as dist
 from .head import iBOTHead
 import numpy as np
+from torch.cuda import comm
 
 
 class CustomSequential(nn.Sequential):
@@ -82,16 +83,12 @@ class MultiCropWrapper(nn.Module):
 class AttFex(nn.Module):
     def __init__(self, args, wm_channels=64, wn_channels=32):
         super(AttFex, self).__init__()
-        # ('--wm-channels', type=int, default=64)
-        # ('--wn-channels', type=int, default=32)
 
         act_fn = nn.LeakyReLU(0.2)
 
         ## AttFEX Module ##
         # 1x1 Convs representing M(.), N(.)
-        # self.n = args.n_ways * (args.k_shots + args.q_shots)  # BS x 2
         # self.n = args.batch_size * 2
-        # torch.cuda.device_count()
         self.n = int(args.batch_size * 2 / torch.cuda.device_count())
 
         self.fe = nn.Sequential(
@@ -103,15 +100,6 @@ class AttFex(nn.Module):
                 1, 1), stride=(1, 1), padding='valid', bias=False),
             act_fn)
 
-        # self.fe = nn.Sequential(
-        #     nn.Conv2d(in_channels=1, out_channels=wm_channels, kernel_size=(  # 64 --> args.wm
-        #         self.n, 1), stride=(1, 1), padding='valid', bias=False),
-        #     act_fn,
-
-        #     nn.Conv2d(in_channels=wm_channels, out_channels=wn_channels, kernel_size=(  # 64 --> args.wm, 32 --> args.wn
-        #         1, 1), stride=(1, 1), padding='valid', bias=False),
-        #     act_fn)
-
         # Query, Key and Value extractors as 1x1 Convs
         self.f_q = nn.Conv2d(in_channels=wn_channels, out_channels=1, kernel_size=(  # 32 --> args.wn
             1, 1), stride=(1, 1), padding='valid', bias=False)
@@ -121,23 +109,16 @@ class AttFex(nn.Module):
             1, 1), stride=(1, 1), padding='valid', bias=False)
 
     def forward(self, x):
+        # torch.is_distributed
+        # devices = [torch.cuda.device(i)
+        #            for i in range(torch.cuda.device_count())]
+        # torch.distributed.all_gather_into_tensor(x, x)
+        # # x_gather = comm.gather(x)
 
-        # Task aware embeddings using AttFEX
-        # G = x.permute(2, 3, 0, 1)
-        # G = G.reshape(G.shape[0] * G.shape[1],
-        #               G.shape[2], G.shape[3]).unsqueeze(dim=1)
         G = x.permute(1, 0, 2, 3)
 
         G = self.fe(G)
 
-        # if (self.args.dataset == 'miniimagenet' and self.args.k_shots == 5):
-        #     xq = self.f_q(G)
-        #     xq = nn.LeakyReLU(0.2)(xq)
-        #     xk = self.f_k(G)
-        #     xk = nn.LeakyReLU(0.2)(xk)
-        #     xv = self.f_v(G)
-        #     xv = nn.LeakyReLU(0.2)(xv)
-        # else:
         xq = self.f_q(G)
         xk = self.f_k(G)
         xv = self.f_v(G)
