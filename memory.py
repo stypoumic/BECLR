@@ -8,6 +8,8 @@ class NNmemoryBankModule(MemoryBankModule):
 
     def forward(self,
                 output: torch.Tensor,
+                epoch: int,
+                start_epoch: int,
                 labels: torch.Tensor = None,
                 update: bool = False):
 
@@ -29,4 +31,9 @@ class NNmemoryBankModule(MemoryBankModule):
         nearest_neighbours = torch.index_select(
             bank, dim=0, index=index_nearest_neighbours)
 
-        return nearest_neighbours
+        # only return the nearest neighbor features instead of the originals,
+        # in case the NNCLR start epoch has passed
+        if epoch > start_epoch:
+            return nearest_neighbours
+        else:
+            return output

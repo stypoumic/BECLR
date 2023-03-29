@@ -51,6 +51,10 @@ def args_parser():
                         help="Whether to use feature alignment on the teacher features")
     parser.add_argument('--w_ori', type=float,
                         default=1.0, help='weight of original features (in case of refinement)')
+    parser.add_argument('--enhance_batch', default=False, type=bool_flag,
+                        help="Whether to artificially enhance the batch size")
+    parser.add_argument('--use_nnclr', default=True, type=bool_flag,
+                        help="Whether to use nnclr")
     parser.add_argument('--nnclr_start_epoch', default=50, type=int,
                         help=' Epoch after which NNCLR is activated (Default: 50).')
     ######
@@ -207,7 +211,8 @@ def train_msiam(args):
                            temp=args.temp).cuda()
 
     # ============ preparing memory queue ... ============
-    nn_replacer = NNmemoryBankModule(size=2 ** 16)
+    teacher_nn_replacer = NNmemoryBankModule(size=2 ** 16)
+    student_nn_replacer = NNmemoryBankModule(size=2 ** 16)
 
     local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_FA_{}_w_{}_T_{}_NNCLR{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
@@ -272,7 +277,7 @@ def train_msiam(args):
         # ============ training one epoch of MSiam ... ============
         loss = train_one_epoch(data_loader, student, teacher, optimizer, fp16_scaler, epoch,
                                lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss,
-                               args, nn_replacer, distil_model)
+                               args, teacher_nn_replacer, student_nn_replacer, distil_model)
         time2 = time.time()
 
         print('epoch {}, total time {:.2f}'.format(epoch+1, time2 - time1))
@@ -310,7 +315,7 @@ def train_msiam(args):
 
 def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoch,
                     lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss,
-                    args, nn_replacer, distil_model=None):
+                    args, teacher_nn_replacer, student_nn_replacer, distil_model=None):
     """one epoch training"""
     student.train()
 
@@ -381,9 +386,10 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                 else:
                     p, p_refined, p_dist = student(masked_images)
                     z, z_refined = teacher(images)
-                    # replace teacher features with NN
-                    if epoch > args.nnclr_start_epoch:
-                        z = nn_replacer(z.detach(), update=True)
+                    # replace teacher features with NN if NNCLR is activated
+                    if args.use_nnclr:
+                        z = teacher_nn_replacer(
+                            z.detach(), epoch, args.nnclr_start_epoch, update=True)
                     loss_state = msiam_loss(
                         z, p, args.batch_size,
                         p_refined=p_refined,
@@ -404,9 +410,14 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                 else:
                     p, p_refined = student(masked_images)
                     z, z_refined = teacher(images)
-                    # replace teacher features with NN
-                    if epoch > args.nnclr_start_epoch:
-                        z = nn_replacer(z.detach(), update=True)
+                    # replace teacher features with NN if NNCLR is activated
+                    if args.use_nnclr:
+                        z = teacher_nn_replacer(
+                            z.detach(), epoch, args.nnclr_start_epoch, update=True)
+                    # concat the features of top-5 neighbors for both student &
+                    # teacher if batch size increase is activated
+                    # if args.enhance_batch and epoch > args.memory_start_epoch:
+                    #     z_NN = teacher_nn_replacer.get_top_5NN(z.detach(), update=True)
                     loss_state = msiam_loss(
                         z, p, args.batch_size,
                         p_refined=p_refined,
