@@ -4,6 +4,7 @@ from models.msiam import MSiamLoss
 from utils import get_params_groups, get_world_size, clip_gradients, \
     cancel_gradients_last_layer, build_fewshot_loader, load_distil_model, build_student_teacher
 from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher, init_distributed_mode
+from memory import NNmemoryBankModule
 from transform.build_transform import DataAugmentationMSiam
 from evaluate import evaluate_fewshot
 from dataset.mask_loader import ImageFolderMask
@@ -50,6 +51,8 @@ def args_parser():
                         help="Whether to use feature alignment on the teacher features")
     parser.add_argument('--w_ori', type=float,
                         default=1.0, help='weight of original features (in case of refinement)')
+    parser.add_argument('--nnclr_start_epoch', default=50, type=int,
+                        help=' Epoch after which NNCLR is activated (Default: 50).')
     ######
     parser.add_argument('--out_dim', default=512, type=int, help="""Dimensionality of
         output for [CLS] token.""")
@@ -203,10 +206,13 @@ def train_msiam(args):
                            lamb_patch=args.lamb_patch,
                            temp=args.temp).cuda()
 
-    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_FA_{}_w_{}_T_{}".format(
+    # ============ preparing memory queue ... ============
+    nn_replacer = NNmemoryBankModule(size=2 ** 16)
+
+    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_FA_{}_w_{}_T_{}_NNCLR{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.use_feature_align,
-        args.w_ori, args.use_feature_align_teacher))
+        args.w_ori, args.use_feature_align_teacher, args.nnclr_start_epoch))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
     writer = SummaryWriter(log_dir=local_runs)
@@ -266,7 +272,7 @@ def train_msiam(args):
         # ============ training one epoch of MSiam ... ============
         loss = train_one_epoch(data_loader, student, teacher, optimizer, fp16_scaler, epoch,
                                lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss,
-                               args, distil_model)
+                               args, nn_replacer, distil_model)
         time2 = time.time()
 
         print('epoch {}, total time {:.2f}'.format(epoch+1, time2 - time1))
@@ -304,7 +310,7 @@ def train_msiam(args):
 
 def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoch,
                     lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss,
-                    args, distil_model=None):
+                    args, nn_replacer, distil_model=None):
     """one epoch training"""
     student.train()
 
@@ -375,6 +381,9 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                 else:
                     p, p_refined, p_dist = student(masked_images)
                     z, z_refined = teacher(images)
+                    # replace teacher features with NN
+                    if epoch > args.nnclr_start_epoch:
+                        z = nn_replacer(z.detach(), update=True)
                     loss_state = msiam_loss(
                         z, p, args.batch_size,
                         p_refined=p_refined,
@@ -396,8 +405,8 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     p, p_refined = student(masked_images)
                     z, z_refined = teacher(images)
                     # replace teacher features with NN
-                    # z0 = self.nn_replacer(z0.detach(), update=False)
-                    # z1 = self.nn_replacer(z1.detach(), update=True)
+                    if epoch > args.nnclr_start_epoch:
+                        z = nn_replacer(z.detach(), update=True)
                     loss_state = msiam_loss(
                         z, p, args.batch_size,
                         p_refined=p_refined,

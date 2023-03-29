@@ -215,7 +215,7 @@ if __name__ == '__main__':
     # need to change that
     args.use_feature_align = False
     args.use_feature_align_teacher = False
-    args.dist = True
+    args.dist = False
 
     args.split_path = (Path(__file__).parent).joinpath('split')
 

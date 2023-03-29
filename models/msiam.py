@@ -419,7 +419,6 @@ class MSiamLoss(nn.Module):
             'std': std
         }
         return loss_state
-        # return loss, loss_pos, loss_neg, loss_patch, std
 
     @torch.no_grad()
     def std(self, z):
