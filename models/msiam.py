@@ -334,9 +334,15 @@ class MSiamLoss(nn.Module):
             args.teacher_patch_temp
         ))
 
-    def forward(self, teacher_cls, student_cls, bsz, teacher_patch=None,
+    def forward(self, teacher_cls, student_cls, args, teacher_patch=None,
                 student_patch=None, student_mask=None, epoch=None,
                 p_refined=None, z_refined=None, p_dist=None, z_dist=None, w_ori=1.0, w_dist=0.5):
+
+        if args.enhance_batch and epoch >= args.memory_start_epoch:
+            bsz = args.batch_size * (1 + args.topk)
+        else:
+            bsz = args.batch_size
+
         z1, z2 = torch.split(teacher_cls, [bsz, bsz], dim=0)
         p1, p2 = torch.split(student_cls, [bsz, bsz], dim=0)
 
