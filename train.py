@@ -51,12 +51,15 @@ def args_parser():
                         help="Whether to use feature alignment on the teacher features")
     parser.add_argument('--w_ori', type=float,
                         default=1.0, help='weight of original features (in case of refinement)')
+
+    parser.add_argument('--topk', default=5, type=int,
+                        help='Number of topk NN to extract, when enhancing the batch size (Default 5).')
     parser.add_argument('--enhance_batch', default=False, type=bool_flag,
                         help="Whether to artificially enhance the batch size")
-    parser.add_argument('--use_nnclr', default=True, type=bool_flag,
+    parser.add_argument('--use_nnclr', default=False, type=bool_flag,
                         help="Whether to use nnclr")
-    parser.add_argument('--nnclr_start_epoch', default=50, type=int,
-                        help=' Epoch after which NNCLR is activated (Default: 50).')
+    parser.add_argument('--memory_start_epoch', default=50, type=int,
+                        help=' Epoch after which NNCLR, or enhance_batch is activated (Default: 50).')
     ######
     parser.add_argument('--out_dim', default=512, type=int, help="""Dimensionality of
         output for [CLS] token.""")
@@ -214,10 +217,15 @@ def train_msiam(args):
     teacher_nn_replacer = NNmemoryBankModule(size=2 ** 16)
     student_nn_replacer = NNmemoryBankModule(size=2 ** 16)
 
-    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_FA_{}_w_{}_T_{}_NNCLR{}".format(
+    if args.use_nnclr:
+        suffix = "NNCLR"
+    elif args.enhance_batch:
+        suffix = "BI"
+    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_FA_{}_w_{}_T_{}_SE{}_{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.use_feature_align,
-        args.w_ori, args.use_feature_align_teacher, args.nnclr_start_epoch))
+        args.w_ori, args.use_feature_align_teacher, args.memory_start_epoch,
+        suffix))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
     writer = SummaryWriter(log_dir=local_runs)
@@ -389,23 +397,33 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     # replace teacher features with NN if NNCLR is activated
                     if args.use_nnclr:
                         z = teacher_nn_replacer(
-                            z.detach(), epoch, args.nnclr_start_epoch, update=True)
+                            z.detach(), epoch, args.memory_start_epoch, update=True)
+                    # concat the features of top-5 neighbors for both student &
+                    # teacher if batch size increase is activated
+                    if args.enhance_batch:
+                        z = teacher_nn_replacer.get_top_kNN(
+                            z.detach(), epoch, args, k=args.topk, update=True)
+                        p = student_nn_replacer.get_top_kNN(
+                            p, epoch, args, k=args.topk, update=True)
+
                     loss_state = msiam_loss(
                         z, p, args.batch_size,
                         p_refined=p_refined,
                         z_refined=z_refined,
+                        epoch=epoch,
                         p_dist=p_dist,
                         z_dist=z_dist,
                         w_ori=args.w_ori)
         else:
             with torch.cuda.amp.autocast(fp16_scaler is not None):
                 if 'deit' in args.backbone:
-                    student_cls, student_patches, z_student = student(
-                        images, masks)
-                    teacher_cls, teacher_patches = teacher(images)
-                    loss_state = msiam_loss(
-                        teacher_cls, student_cls, args.batch_size, teacher_patches,
-                        student_patches, masks, epoch)
+                    pass
+                    # student_cls, student_patches, z_student = student(
+                    #     images, masks)
+                    # teacher_cls, teacher_patches = teacher(images)
+                    # loss_state = msiam_loss(
+                    #     teacher_cls, student_cls, args.batch_size, teacher_patches,
+                    #     student_patches, masks, epoch)
 
                 else:
                     p, p_refined = student(masked_images)
@@ -413,15 +431,20 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     # replace teacher features with NN if NNCLR is activated
                     if args.use_nnclr:
                         z = teacher_nn_replacer(
-                            z.detach(), epoch, args.nnclr_start_epoch, update=True)
+                            z.detach(), epoch, args.memory_start_epoch, update=True)
                     # concat the features of top-5 neighbors for both student &
                     # teacher if batch size increase is activated
-                    # if args.enhance_batch and epoch > args.memory_start_epoch:
-                    #     z_NN = teacher_nn_replacer.get_top_5NN(z.detach(), update=True)
+                    if args.enhance_batch:
+                        z = teacher_nn_replacer.get_top_kNN(
+                            z.detach(), epoch, args, k=args.topk, update=True)
+                        p = student_nn_replacer.get_top_kNN(
+                            p, epoch, args, k=args.topk, update=True)
+
                     loss_state = msiam_loss(
-                        z, p, args.batch_size,
+                        z, p, args,
                         p_refined=p_refined,
                         z_refined=z_refined,
+                        epoch=epoch,
                         w_ori=args.w_ori)
 
         loss = loss_state['loss']
