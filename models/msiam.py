@@ -338,13 +338,18 @@ class MSiamLoss(nn.Module):
                 student_patch=None, student_mask=None, epoch=None,
                 p_refined=None, z_refined=None, p_dist=None, z_dist=None, w_ori=1.0, w_dist=0.5):
 
-        if args.enhance_batch and epoch >= args.memory_start_epoch:
-            bsz = args.batch_size * (1 + args.topk)
-        else:
-            bsz = args.batch_size
+        z_bsz = p_bsz = args.batch_size
+        if epoch >= args.memory_start_epoch:
+            if args.enhance_batch:
+                z_bsz = p_bsz = args.batch_size * (1 + args.topk)
+            elif args.use_nnclr:
+                z_bsz = args.batch_size * (args.topk)
 
-        z1, z2 = torch.split(teacher_cls, [bsz, bsz], dim=0)
-        p1, p2 = torch.split(student_cls, [bsz, bsz], dim=0)
+        z1, z2 = torch.split(teacher_cls, [z_bsz, z_bsz], dim=0)
+        p1, p2 = torch.split(student_cls, [p_bsz, p_bsz], dim=0)
+        if z_bsz != p_bsz:
+            p1 = p1.repeat(args.topk, 1)
+            p2 = p2.repeat(args.topk, 1)
 
         loss_pos = (self.pos(p1, z2)+self.pos(p2, z1))/2
 
@@ -356,10 +361,11 @@ class MSiamLoss(nn.Module):
         loss_neg = self.neg(teacher_cls)
 
         if p_refined is not None:
-            p1_refined, p2_refined = torch.split(p_refined, [bsz, bsz], dim=0)
+            p1_refined, p2_refined = torch.split(
+                p_refined, [p_bsz, p_bsz], dim=0)
             if z_refined is not None:
                 z1_refined, z2_refined = torch.split(
-                    z_refined, [bsz, bsz], dim=0)
+                    z_refined, [z_bsz, z_bsz], dim=0)
             else:
                 z1_refined, z2_refined = z1, z2
 
