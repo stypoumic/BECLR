@@ -397,7 +397,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     # replace teacher features with NN if NNCLR is activated
                     if args.use_nnclr:
                         z = teacher_nn_replacer(
-                            z.detach(), epoch, args.memory_start_epoch, update=True)
+                            z.detach(), epoch, args, k=args.topk, update=True)
                     # concat the features of top-5 neighbors for both student &
                     # teacher if batch size increase is activated
                     if args.enhance_batch:
@@ -431,7 +431,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     # replace teacher features with NN if NNCLR is activated
                     if args.use_nnclr:
                         z = teacher_nn_replacer(
-                            z.detach(), epoch, args.memory_start_epoch, update=True)
+                            z.detach(), epoch, args, k=args.topk, update=True)
                     # concat the features of top-5 neighbors for both student &
                     # teacher if batch size increase is activated
                     if args.enhance_batch:
