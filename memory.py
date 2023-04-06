@@ -115,3 +115,4 @@ class NNmemoryBankModule(MemoryBankModule):
             return z
         else:
             return output
+        

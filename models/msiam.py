@@ -235,6 +235,11 @@ class MSiam(nn.Module):
                     nn.ReLU(inplace=True),
                     nn.Linear(dim_out//4, dim_out)
                 )
+            # prototype layer
+            self.prototypes = None
+            if args.use_clustering:
+                self.prototypes = nn.Linear(
+                    dim_out, args.nmb_prototypes, bias=False)
 
     def forward(self, x, masks=None):
 
@@ -269,7 +274,6 @@ class MSiam(nn.Module):
                 return p, f_patch, z
         else:
             f = self.encoder(x)
-
             if not self.is_teacher:
                 if self.use_feature_align:
                     # apply feature alignment
@@ -282,12 +286,20 @@ class MSiam(nn.Module):
                 f = torch.flatten(f, 1)
                 z = self.proj(f)
                 p = self.pred(z)
+
                 # apply self-distilliation
                 if self.dist:
                     p_dist = self.pred_dist(f)
-                    return p, p_refined, p_dist
+                else:
+                    p_dist = None
 
-                return p, p_refined
+                # get prototypes
+                if self.prototypes != None:
+                    prototypes = self.prototypes(f)
+                else:
+                    prototypes = None
+
+                return p, p_refined, p_dist, prototypes
             else:
                 if self.use_feature_align and self.use_feature_align_teacher:
                     # apply feature alignment
@@ -297,14 +309,22 @@ class MSiam(nn.Module):
                     z_refined = None
                 f = torch.flatten(f, 1)
                 z = self.proj(f)
-            return z, z_refined
+
+                # get prototypes
+                if self.prototypes != None:
+                    prototypes = self.prototypes(f)
+                else:
+                    prototypes = None
+
+                return z, z_refined, prototypes
 
 
 class MSiamLoss(nn.Module):
 
     def __init__(self, args, lamb_neg=0.1, lamb_patch=0.1, temp=2.0, ngcrops=2, student_temp=0.1,
-                 center_momentum=0.9, center_momentum2=0.9, lambda1=1.0):
+                 center_momentum=0.9, center_momentum2=0.9, lambda1=1):
         super(MSiamLoss, self).__init__()
+        self.args = args
         self.use_patches = args.use_patches
         self.use_transformers = 'deit' in args.backbone
         self.lamb_neg = lamb_neg
@@ -336,7 +356,8 @@ class MSiamLoss(nn.Module):
 
     def forward(self, teacher_cls, student_cls, args, teacher_patch=None,
                 student_patch=None, student_mask=None, epoch=None,
-                p_refined=None, z_refined=None, p_dist=None, z_dist=None, w_ori=1.0, w_dist=0.5):
+                p_refined=None, z_refined=None, p_dist=None, z_dist=None, w_ori=1.0,
+                w_dist=0.5, memory=None):
 
         z_bsz = p_bsz = args.batch_size
         if epoch >= args.memory_start_epoch:
@@ -358,7 +379,10 @@ class MSiamLoss(nn.Module):
         #         torch.cat((torch.unsqueeze(teacher_cls, 1), teacher_patch), dim=1))
         # else:
         # changed to student (student_z)``
-        loss_neg = self.neg(teacher_cls)
+        if self.args.use_memory_in_loss:
+            loss_neg = self.neg(teacher_cls, epoch, memory)
+        else:
+            loss_neg = self.neg(teacher_cls)
 
         if p_refined is not None:
             p1_refined, p2_refined = torch.split(
@@ -442,7 +466,7 @@ class MSiamLoss(nn.Module):
         p = F.normalize(p, dim=1)
         return -(p*z).sum(dim=1).mean()
 
-    def neg(self, z):
+    def neg(self, z, epoch=None, memory=None):
         batch_size = z.shape[0] // 2
         n_neg = z.shape[0] - 2
         z = F.normalize(z, dim=-1)
@@ -453,8 +477,12 @@ class MSiamLoss(nn.Module):
         #     z2 = z.permute(1, 2, 0)
         #     out = torch.matmul(z1, z2) * mask
         # else:
-        out = torch.matmul(z, z.T) * mask
-        return (out.div(self.temp).exp().sum(1)-2).div(n_neg).mean().log()
+        if memory == None or epoch < self.args.memory_start_epoch:
+            out = torch.matmul(z, z.T) * mask
+            return (out.div(self.temp).exp().sum(1)-2).div(n_neg).mean().log()
+        else:
+            out = torch.matmul(z, memory)
+            return (out.div(self.temp).exp().sum(1)).div(memory.shape[1]).mean().log()
 
     @torch.no_grad()
     def update_center(self, teacher_cls, teacher_patch):
@@ -473,3 +501,70 @@ class MSiamLoss(nn.Module):
             (len(teacher_patch) * dist.get_world_size())
         self.center2 = self.center2 * self.center_momentum2 + \
             patch_center * (1 - self.center_momentum2)
+
+
+def swav_loss(args, student_out, teacher_out, student, teacher, s_memory, t_memory):
+    # ============ swav loss ... ============
+    loss = 0
+    bsz = teacher_out.shape[0] // 2
+    z1, z2 = torch.split(teacher_out, [bsz, bsz], dim=0)
+    p1, p2 = torch.split(student_out, [bsz, bsz], dim=0)
+
+    # p2 --> z1
+    # p1 --> z2
+    # z2 --> p1
+    # z1 --> p2
+    loss = code_predict(args, z1, t_memory, teacher, p2) + code_predict(args, z2, t_memory, teacher, p1) + \
+        code_predict(args, p1, s_memory, student, z2) + \
+        code_predict(args, p2, s_memory, student, z1)
+    loss /= 4
+
+
+def code_predict(args, output, memory, model, x):
+    # concat to output X embeddings from memory
+    N = 20 * args.batch_size
+    bs = output.shape[0]
+
+    # load memory
+    bank = memory.bank.cuda()
+    # get N random embeddings from memory
+    indices = torch.randperm(bank.shape[1])[:N]
+    # multiply with prototypes weights to get memory prototypes
+    memory_prototypes = torch.mm(
+        bank[:, indices].T, model.module.prototypes.weight.t())
+    # concat with orignal prototypes from original features
+    output = torch.cat((output, memory_prototypes), 0)
+
+    # get assignments (only for bs)
+    q = distributed_sinkhorn(output, args)[-bs:]
+    exit()
+
+    # cluster assignment prediction
+    return -torch.mean(torch.sum(q * F.log_softmax(x, dim=1), dim=1))
+
+
+@torch.no_grad()
+def distributed_sinkhorn(out, args):
+    # Q is K-by-B for consistency with notations from our paper
+    Q = torch.exp(out / args.epsilon).t()
+    B = Q.shape[1] * args.world_size  # number of samples to assign
+    K = Q.shape[0]  # how many prototypes
+
+    # make the matrix sums to 1
+    sum_Q = torch.sum(Q)
+    dist.all_reduce(sum_Q)
+    Q /= sum_Q
+
+    for it in range(args.sinkhorn_iterations):
+        # normalize each row: total weight per prototype must be 1/K
+        sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+        dist.all_reduce(sum_of_rows)
+        Q /= sum_of_rows
+        Q /= K
+
+        # normalize each column: total weight per sample must be 1/B
+        Q /= torch.sum(Q, dim=0, keepdim=True)
+        Q /= B
+
+    Q *= B  # the colomns must sum to 1 so that Q is an assignment
+    return Q.t()
