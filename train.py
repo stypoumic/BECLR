@@ -1,6 +1,6 @@
 from __future__ import print_function
 from torch.utils.tensorboard import SummaryWriter
-from models.msiam import MSiamLoss
+from models.msiam import MSiamLoss, swav_loss
 from utils import get_params_groups, get_world_size, clip_gradients, \
     cancel_gradients_last_layer, build_fewshot_loader, load_distil_model, build_student_teacher
 from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher, init_distributed_mode
@@ -20,6 +20,7 @@ import datetime
 import time
 
 import torch
+import torch.nn as nn
 torch.cuda.empty_cache()
 
 
@@ -52,6 +53,22 @@ def args_parser():
     parser.add_argument('--w_ori', type=float,
                         default=1.0, help='weight of original features (in case of refinement)')
 
+    # clustering
+    parser.add_argument('--use_clustering', default=False, type=bool_flag,
+                        help="Whether to use online clustering")
+    parser.add_argument("--sinkhorn_iterations", default=3, type=int,
+                        help="number of iterations in Sinkhorn-Knopp algorithm")
+    parser.add_argument("--nmb_prototypes", default=3000, type=int,
+                        help="number of prototypes")
+    parser.add_argument("--freeze_prototypes_niters", default=313, type=int,
+                        help="freeze the prototypes during this many iterations from the start")
+    parser.add_argument("--epsilon", default=0.05, type=float,
+                        help="regularization parameter for Sinkhorn-Knopp algorithm")
+    parser.add_argument("--world_size", default=2, type=int, help="""
+                    number of processes: it is set automatically and
+                    should not be passed as argument""")
+
+    # memory
     parser.add_argument('--topk', default=5, type=int,
                         help='Number of topk NN to extract, when enhancing the batch size (Default 5).')
     parser.add_argument('--enhance_batch', default=False, type=bool_flag,
@@ -60,6 +77,9 @@ def args_parser():
                         help="Whether to use nnclr")
     parser.add_argument('--memory_start_epoch', default=50, type=int,
                         help=' Epoch after which NNCLR, or enhance_batch is activated (Default: 50).')
+    parser.add_argument('--use_memory_in_loss', default=False, type=bool_flag,
+                        help="Whether to use memory in uniformity loss")
+
     ######
     parser.add_argument('--out_dim', default=512, type=int, help="""Dimensionality of
         output for [CLS] token.""")
@@ -221,11 +241,10 @@ def train_msiam(args):
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_FA_{}_w_{}_T_{}_SE{}_{}".format(
+    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_{}_top{}_UM_{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
-        args.momentum_teacher, args.dist, args.use_fp16, args.use_feature_align,
-        args.w_ori, args.use_feature_align_teacher, args.memory_start_epoch,
-        suffix))
+        args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
+        suffix, args.topk, args.use_memory_in_loss))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
     writer = SummaryWriter(log_dir=local_runs)
@@ -388,64 +407,52 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                 # could also give unmasked images as input to teacher
                 z_dist, _ = distil_model(masked_images)
                 z_dist = z_dist.detach()
-            with torch.cuda.amp.autocast(fp16_scaler is not None):
-                if 'deit' in args.backbone:
-                    pass
-                else:
-                    p, p_refined, p_dist = student(masked_images)
-                    z, z_refined = teacher(images)
-                    # replace teacher features with NN if NNCLR is activated
-                    if args.use_nnclr:
-                        z = teacher_nn_replacer(
-                            z.detach(), epoch, args, k=args.topk, update=True)
-                    # concat the features of top-5 neighbors for both student &
-                    # teacher if batch size increase is activated
-                    if args.enhance_batch:
-                        z = teacher_nn_replacer.get_top_kNN(
-                            z.detach(), epoch, args, k=args.topk, update=True)
-                        p = student_nn_replacer.get_top_kNN(
-                            p, epoch, args, k=args.topk, update=True)
-
-                    loss_state = msiam_loss(
-                        z, p, args.batch_size,
-                        p_refined=p_refined,
-                        z_refined=z_refined,
-                        epoch=epoch,
-                        p_dist=p_dist,
-                        z_dist=z_dist,
-                        w_ori=args.w_ori)
         else:
-            with torch.cuda.amp.autocast(fp16_scaler is not None):
-                if 'deit' in args.backbone:
-                    pass
-                    # student_cls, student_patches, z_student = student(
-                    #     images, masks)
-                    # teacher_cls, teacher_patches = teacher(images)
-                    # loss_state = msiam_loss(
-                    #     teacher_cls, student_cls, args.batch_size, teacher_patches,
-                    #     student_patches, masks, epoch)
+            z_dist = None
 
-                else:
-                    p, p_refined = student(masked_images)
-                    z, z_refined = teacher(images)
-                    # replace teacher features with NN if NNCLR is activated
-                    if args.use_nnclr:
-                        z = teacher_nn_replacer(
-                            z.detach(), epoch, args, k=args.topk, update=True)
-                    # concat the features of top-5 neighbors for both student &
-                    # teacher if batch size increase is activated
-                    if args.enhance_batch:
-                        z = teacher_nn_replacer.get_top_kNN(
-                            z.detach(), epoch, args, k=args.topk, update=True)
-                        p = student_nn_replacer.get_top_kNN(
-                            p, epoch, args, k=args.topk, update=True)
+        if args.use_clustering:
+            # normalize the prototypes
+            with torch.no_grad():
+                w_student = student.module.prototypes.weight.data.clone()
+                w_student = nn.functional.normalize(w_student, dim=1, p=2)
+                student.module.prototypes.weight.copy_(w_student)
 
-                    loss_state = msiam_loss(
-                        z, p, args,
-                        p_refined=p_refined,
-                        z_refined=z_refined,
-                        epoch=epoch,
-                        w_ori=args.w_ori)
+                w_teacher = teacher.module.prototypes.weight.data.clone()
+                w_teacher = nn.functional.normalize(w_teacher, dim=1, p=2)
+                teacher.module.prototypes.weight.copy_(w_teacher)
+
+        with torch.cuda.amp.autocast(fp16_scaler is not None):
+            if 'deit' in args.backbone:
+                pass
+            else:
+                p, p_refined, p_dist, s_prototypes = student(masked_images)
+                z, z_refined, t_prototypes = teacher(images)
+                # replace teacher features with NN if NNCLR is activated
+                if args.use_nnclr:
+                    z = teacher_nn_replacer(
+                        z.detach(), epoch, args, k=args.topk, update=True)
+                # concat the features of top-5 neighbors for both student &
+                # teacher if batch size increase is activated
+                if args.enhance_batch:
+                    z = teacher_nn_replacer.get_top_kNN(
+                        z.detach(), epoch, args, k=args.topk, update=True)
+                    p = student_nn_replacer.get_top_kNN(
+                        p, epoch, args, k=args.topk, update=True)
+
+                if args.use_clustering:
+                    cluster_loss = swav_loss(args, s_prototypes, t_prototypes, student,
+                                             teacher, student_nn_replacer,
+                                             teacher_nn_replacer)
+
+                loss_state = msiam_loss(
+                    z, p, args,
+                    p_refined=p_refined,
+                    z_refined=z_refined,
+                    epoch=epoch,
+                    p_dist=p_dist,
+                    z_dist=z_dist,
+                    w_ori=args.w_ori,
+                    memory=teacher_nn_replacer.bank.cuda())
 
         loss = loss_state['loss']
         # student update
