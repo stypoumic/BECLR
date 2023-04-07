@@ -79,6 +79,9 @@ def args_parser():
                         help=' Epoch after which NNCLR, or enhance_batch is activated (Default: 50).')
     parser.add_argument('--use_memory_in_loss', default=False, type=bool_flag,
                         help="Whether to use memory in uniformity loss")
+    parser.add_argument('--pos_threshold', default=0.8, type=float,
+                        help="""When the cosine similarity of 2 embeddings is above this threshold, 
+                        they are treated as positives, and masked out from the uniformity loss""")
 
     ######
     parser.add_argument('--out_dim', default=512, type=int, help="""Dimensionality of
@@ -177,7 +180,7 @@ def args_parser():
     parser.add_argument('--n_way', type=int, default=5, help='n_way')
     parser.add_argument('--n_query', type=int, default=15, help='n_query')
     parser.add_argument('--n_test_task', type=int,
-                        default=400, help='total test few-shot episodes')
+                        default=600, help='total test few-shot episodes')
     parser.add_argument('--test_batch_size', type=int,
                         default=5, help='episode_batch_size')
     parser.add_argument('--eval_freq', type=int,
@@ -237,6 +240,7 @@ def train_msiam(args):
     teacher_nn_replacer = NNmemoryBankModule(size=2 ** 16)
     student_nn_replacer = NNmemoryBankModule(size=2 ** 16)
 
+    suffix = ""
     if args.use_nnclr:
         suffix = "NNCLR"
     elif args.enhance_batch:
