@@ -245,10 +245,11 @@ def train_msiam(args):
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_{}_top{}_UM_{}".format(
+    local_runs = os.path.join("runs", "NEW_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_{}_top{}_UM_{}_AS_{}_AT_{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
-        suffix, args.topk, args.use_memory_in_loss))
+        suffix, args.topk, args.use_memory_in_loss, args.use_feature_align,
+        args.use_feature_align_teacher))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
     writer = SummaryWriter(log_dir=local_runs)
@@ -429,19 +430,38 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
             if 'deit' in args.backbone:
                 pass
             else:
-                p, p_refined, p_dist, s_prototypes = student(masked_images)
-                z, z_refined, t_prototypes = teacher(images)
+                # initialize refined features as None
+                p_refined = None
+                z_refined = None
+
+                p, p_dist, s_prototypes = student(masked_images)
+                z, t_prototypes = teacher(images)
                 # replace teacher features with NN if NNCLR is activated
                 if args.use_nnclr:
                     z = teacher_nn_replacer(
                         z.detach(), epoch, args, k=args.topk, update=True)
+                    z = teacher.module.proj(z)
                 # concat the features of top-5 neighbors for both student &
                 # teacher if batch size increase is activated
                 if args.enhance_batch:
-                    z = teacher_nn_replacer.get_top_kNN(
+                    z_f = teacher_nn_replacer.get_top_kNN(
                         z.detach(), epoch, args, k=args.topk, update=True)
-                    p = student_nn_replacer.get_top_kNN(
+                    z = teacher.module.proj(z_f)
+
+                    p_f = student_nn_replacer.get_top_kNN(
                         p, epoch, args, k=args.topk, update=True)
+                    p = student.module.proj(p_f)
+                    p = student.module.pred(p)
+
+                    # apply feature alignment
+                    if args.use_feature_align:
+                        f_refined = student.module.feature_extractor(p_f)
+                        z_refined = student.module.proj_align(f_refined)
+                        p_refined = student.module.pred_align(z_refined)
+
+                    if args.use_feature_align_teacher:
+                        f_refined = teacher.module.feature_extractor(z_f)
+                        z_refined = teacher.module.proj_align(f_refined)
 
                 if args.use_clustering:
                     cluster_loss = swav_loss(args, s_prototypes, t_prototypes, student,
