@@ -380,7 +380,7 @@ class MSiamLoss(nn.Module):
         # else:
         # changed to student (student_z)``
         if self.args.use_memory_in_loss:
-            loss_neg = self.neg(teacher_cls, epoch, memory)
+            loss_neg = self.neg(teacher_cls, epoch, memory, args.pos_threshold)
         else:
             loss_neg = self.neg(teacher_cls)
 
@@ -466,7 +466,7 @@ class MSiamLoss(nn.Module):
         p = F.normalize(p, dim=1)
         return -(p*z).sum(dim=1).mean()
 
-    def neg(self, z, epoch=None, memory=None):
+    def neg(self, z, epoch=None, memory=None, pos_threshold=0.8):
         batch_size = z.shape[0] // 2
         n_neg = z.shape[0] - 2
         z = F.normalize(z, dim=-1)
@@ -482,7 +482,9 @@ class MSiamLoss(nn.Module):
             return (out.div(self.temp).exp().sum(1)-2).div(n_neg).mean().log()
         else:
             out = torch.matmul(z, memory)
-            return (out.div(self.temp).exp().sum(1)).div(memory.shape[1]).mean().log()
+            n_neg = torch.sum(out <= pos_threshold)
+            out[out > pos_threshold] = 0.0
+            return (out.div(self.temp).exp().sum(1)).div(n_neg).mean().log()
 
     @torch.no_grad()
     def update_center(self, teacher_cls, teacher_patch):
