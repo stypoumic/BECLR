@@ -89,7 +89,9 @@ class AttFex(nn.Module):
         ## AttFEX Module ##
         # 1x1 Convs representing M(.), N(.)
         # self.n = args.batch_size * 2
-        self.n = int(args.batch_size * 2 / torch.cuda.device_count())
+        self.n = int((args.batch_size * (1 + args.topk) * 2) /
+                     torch.cuda.device_count())
+        # self.n = int(args.batch_size * 2 / torch.cuda.device_count())
 
         self.fe = nn.Sequential(
             nn.Conv2d(in_channels=self.n, out_channels=wm_channels, kernel_size=(  # 64 --> args.wm
@@ -115,6 +117,7 @@ class AttFex(nn.Module):
         # torch.distributed.all_gather_into_tensor(x, x)
         # # x_gather = comm.gather(x)
 
+        x = x[:, :, None, None]
         G = x.permute(1, 0, 2, 3)
 
         G = self.fe(G)
@@ -154,6 +157,9 @@ class MSiam(nn.Module):
         self.encoder = encoder
 
         dim_out = dim_in if args.out_dim is None else args.out_dim
+        self.use_features_before_proj = False
+        if args.use_nnclr or args.enhance_batch:
+            self.use_features_before_proj = True
         self.use_transformers = use_transformers
         self.use_feature_align = args.use_feature_align
         self.use_feature_align_teacher = args.use_feature_align_teacher
@@ -162,6 +168,22 @@ class MSiam(nn.Module):
 
         if self.use_feature_align:
             self.feature_extractor = AttFex(args)
+            self.proj_align = nn.Sequential(
+                nn.Linear(dim_in, dim_out),
+                nn.BatchNorm1d(dim_out),
+                nn.ReLU(inplace=True),
+                nn.Linear(dim_out, dim_out),
+                nn.BatchNorm1d(dim_out),
+                nn.ReLU(inplace=True),
+                nn.Linear(dim_out, dim_out),
+                nn.BatchNorm1d(dim_out),
+            )
+            self.pred_align = nn.Sequential(
+                nn.Linear(dim_out, dim_out//4),
+                nn.BatchNorm1d(dim_out//4),
+                nn.ReLU(inplace=True),
+                nn.Linear(dim_out//4, dim_out)
+            )
 
         if self.use_transformers:
             # CustomSequential
@@ -275,17 +297,12 @@ class MSiam(nn.Module):
         else:
             f = self.encoder(x)
             if not self.is_teacher:
-                if self.use_feature_align:
-                    # apply feature alignment
-                    f_refined = self.feature_extractor(f)
-                    z_refined = self.proj(f_refined)
-                    p_refined = self.pred(z_refined)
+                # f = torch.flatten(f, 1)
+                if self.use_features_before_proj:
+                    p = f
                 else:
-                    p_refined = None
-
-                f = torch.flatten(f, 1)
-                z = self.proj(f)
-                p = self.pred(z)
+                    z = self.proj(f)
+                    p = self.pred(z)
 
                 # apply self-distilliation
                 if self.dist:
@@ -299,16 +316,12 @@ class MSiam(nn.Module):
                 else:
                     prototypes = None
 
-                return p, p_refined, p_dist, prototypes
+                return p, p_dist, prototypes
             else:
-                if self.use_feature_align and self.use_feature_align_teacher:
-                    # apply feature alignment
-                    f_refined = self.feature_extractor(f)
-                    z_refined = self.proj(f_refined)
+                if self.use_features_before_proj:
+                    z = f
                 else:
-                    z_refined = None
-                f = torch.flatten(f, 1)
-                z = self.proj(f)
+                    z = self.proj(f)
 
                 # get prototypes
                 if self.prototypes != None:
@@ -316,7 +329,7 @@ class MSiam(nn.Module):
                 else:
                     prototypes = None
 
-                return z, z_refined, prototypes
+                return z, prototypes
 
 
 class MSiamLoss(nn.Module):
