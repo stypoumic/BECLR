@@ -117,6 +117,7 @@ def evaluate_fewshot(
         # print("Befor Normalization: {}".format(not torch.isfinite(f).any()))
 
         # mean normalization
+        f = f[:, :, None, None]  # unflatten resnet output
         f = normalize(f, torch.mean(
             f, dim=1, keepdim=True), torch.std(f, dim=1, keepdim=True), inplace=True)
 
