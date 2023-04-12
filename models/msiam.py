@@ -89,8 +89,9 @@ class AttFex(nn.Module):
         ## AttFEX Module ##
         # 1x1 Convs representing M(.), N(.)
         # self.n = args.batch_size * 2
-        self.n = int((args.batch_size * (1 + args.topk) * 2) /
-                     torch.cuda.device_count())
+        self.n = int((args.batch_size * (1 + args.topk) * 2))
+        #   /
+        #  torch.cuda.device_count())
         # self.n = int(args.batch_size * 2 / torch.cuda.device_count())
 
         self.fe = nn.Sequential(
@@ -111,11 +112,17 @@ class AttFex(nn.Module):
             1, 1), stride=(1, 1), padding='valid', bias=False)
 
     def forward(self, x):
-        # torch.is_distributed
-        # devices = [torch.cuda.device(i)
-        #            for i in range(torch.cuda.device_count())]
-        # torch.distributed.all_gather_into_tensor(x, x)
-        # # x_gather = comm.gather(x)
+        # print(x.size())
+        # bsz = x.shape[0]
+        # x_gathered = nn.parallel.gather(x, torch.cuda.device(0))
+        # x_gathered = torch.reshape(x_gathered, (bsz, -1))
+        # print(x.size())
+        # if torch.any(x_gathered != x):
+        #     print("AAA")
+        # x = x_gathered
+
+        # test2 = nn.parallel.scatter(test, [torch.cuda.device(i)
+        #                                    for i in range(torch.cuda.device_count())])
 
         x = x[:, :, None, None]
         G = x.permute(1, 0, 2, 3)
@@ -158,8 +165,6 @@ class MSiam(nn.Module):
 
         dim_out = dim_in if args.out_dim is None else args.out_dim
         self.use_features_before_proj = False
-        if args.use_nnclr or args.enhance_batch:
-            self.use_features_before_proj = True
         self.use_transformers = use_transformers
         self.use_feature_align = args.use_feature_align
         self.use_feature_align_teacher = args.use_feature_align_teacher
@@ -298,11 +303,8 @@ class MSiam(nn.Module):
             f = self.encoder(x)
             if not self.is_teacher:
                 # f = torch.flatten(f, 1)
-                if self.use_features_before_proj:
-                    p = f
-                else:
-                    z = self.proj(f)
-                    p = self.pred(z)
+                z = self.proj(f)
+                p = self.pred(z)
 
                 # apply self-distilliation
                 if self.dist:
@@ -318,10 +320,7 @@ class MSiam(nn.Module):
 
                 return p, p_dist, prototypes
             else:
-                if self.use_features_before_proj:
-                    z = f
-                else:
-                    z = self.proj(f)
+                z = self.proj(f)
 
                 # get prototypes
                 if self.prototypes != None:
@@ -340,7 +339,7 @@ class MSiamLoss(nn.Module):
         self.args = args
         self.use_patches = args.use_patches
         self.use_transformers = 'deit' in args.backbone
-        self.lamb_neg = lamb_neg
+        self.lamb_neg = args.lamb_neg
         self.lamb_patch = lamb_patch
         self.temp = temp
         self.student_temp = student_temp
