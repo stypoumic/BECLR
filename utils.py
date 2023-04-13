@@ -92,6 +92,14 @@ def has_batchnorms(model):
             return True
     return False
 
+def fix_random_seeds(seed=31):
+    """
+    Fix random seeds.
+    """
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+
 
 def load_distil_model(args):
     use_transformers = True if 'deit' in args.backbone else False

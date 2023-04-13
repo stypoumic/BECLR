@@ -3,7 +3,7 @@ from torch.utils.tensorboard import SummaryWriter
 from models.msiam import MSiamLoss, swav_loss
 from utils import get_params_groups, get_world_size, clip_gradients, \
     cancel_gradients_last_layer, build_fewshot_loader, load_distil_model, build_student_teacher
-from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher, init_distributed_mode
+from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher, fix_random_seeds
 from memory import NNmemoryBankModule
 from transform.build_transform import DataAugmentationMSiam
 from evaluate import evaluate_fewshot
@@ -52,6 +52,7 @@ def args_parser():
                         help="Whether to use feature alignment on the teacher features")
     parser.add_argument('--w_ori', type=float,
                         default=1.0, help='weight of original features (in case of refinement)')
+    parser.add_argument("--seed", type=int, default=31, help="seed")
 
     # clustering
     parser.add_argument('--use_clustering', default=False, type=bool_flag,
@@ -567,6 +568,7 @@ if __name__ == '__main__':
     args.dist = args.teacher_path is not None
     ##
     # init_distributed_mode(args)
+    fix_random_seeds(args.seed)
 
     Path(args.save_path).mkdir(parents=True, exist_ok=True)
     train_msiam(args)
