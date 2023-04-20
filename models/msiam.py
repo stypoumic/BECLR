@@ -90,7 +90,7 @@ class AttFex(nn.Module):
         # 1x1 Convs representing M(.), N(.)
         # self.n = args.batch_size * 2
         self.n = int((args.batch_size * (1 + args.topk) * 2))
-        #   /
+        #
         #  torch.cuda.device_count())
         # self.n = int(args.batch_size * 2 / torch.cuda.device_count())
 
@@ -318,7 +318,7 @@ class MSiam(nn.Module):
                 else:
                     prototypes = None
 
-                return p, p_dist, prototypes
+                return p, z, f, p_dist, prototypes
             else:
                 z = self.proj(f)
 
@@ -328,7 +328,7 @@ class MSiam(nn.Module):
                 else:
                     prototypes = None
 
-                return z, prototypes
+                return z, f, prototypes
 
 
 class MSiamLoss(nn.Module):
@@ -366,8 +366,7 @@ class MSiamLoss(nn.Module):
             args.teacher_patch_temp
         ))
 
-    def forward(self, teacher_cls, student_cls, args, teacher_patch=None,
-                student_patch=None, student_mask=None, epoch=None,
+    def forward(self, z_teacher, p_student, z_student, args, epoch=None,
                 p_refined=None, z_refined=None, p_dist=None, z_dist=None, w_ori=1.0,
                 w_dist=0.5, memory=None):
 
@@ -378,8 +377,9 @@ class MSiamLoss(nn.Module):
             elif args.use_nnclr:
                 z_bsz = args.batch_size * (args.topk)
 
-        z1, z2 = torch.split(teacher_cls, [z_bsz, z_bsz], dim=0)
-        p1, p2 = torch.split(student_cls, [p_bsz, p_bsz], dim=0)
+        z1, z2 = torch.split(z_teacher, [z_bsz, z_bsz], dim=0)
+        z1_s, z2_s = torch.split(z_student, [p_bsz, p_bsz], dim=0)
+        p1, p2 = torch.split(p_student, [p_bsz, p_bsz], dim=0)
         if z_bsz != p_bsz:
             p1 = p1.repeat(args.topk, 1)
             p2 = p2.repeat(args.topk, 1)
@@ -391,10 +391,15 @@ class MSiamLoss(nn.Module):
         #         torch.cat((torch.unsqueeze(teacher_cls, 1), teacher_patch), dim=1))
         # else:
         # changed to student (student_z)``
+        if args.uniformity_config != "TT":
+            z1 = z1_s
+            if args.uniformity_config == "SS":
+                z2 = z2_s
+ 
         if self.args.use_memory_in_loss:
-            loss_neg = self.neg(teacher_cls, epoch, memory, args.pos_threshold)
+            loss_neg = self.neg(z1, z2, epoch, memory, args.pos_threshold)
         else:
-            loss_neg = self.neg(teacher_cls)
+            loss_neg = self.neg(z1, z2)
 
         if p_refined is not None:
             p1_refined, p2_refined = torch.split(
@@ -420,42 +425,9 @@ class MSiamLoss(nn.Module):
             loss = w_dist * loss + w_dist * loss_dist
         else:
             loss_dist = 0.0
+        loss_patch = 0.0
 
-        if self.use_patches and self.use_transformers:
-            # [CLS] and patch for global patches
-            student_cls = student_cls / self.student_temp
-            student_cls_c = student_cls.chunk(self.ngcrops)
-            student_patch = student_patch / self.student_temp
-            student_patch_c = student_patch.chunk(self.ngcrops)
-
-            # teacher centering and sharpening
-            temp = self.teacher_temp_schedule[epoch]
-            temp2 = self.teacher_temp2_schedule[epoch]
-            teacher_cls_c = F.softmax(
-                (teacher_cls - self.center) / temp, dim=-1)
-            teacher_cls_c = teacher_cls_c.detach().chunk(self.ngcrops)
-            teacher_patch_c = F.softmax(
-                (teacher_patch - self.center2) / temp2, dim=-1)
-            teacher_patch_c = teacher_patch_c.detach().chunk(self.ngcrops)
-
-            loss_patch, n_patch_loss_terms = 0.0, 0
-            for q in range(len(teacher_cls_c)):
-                for v in range(len(student_cls_c)):
-                    loss_p = torch.sum(-teacher_patch_c[q] * F.log_softmax(
-                        student_patch_c[v], dim=-1), dim=-1)
-                    mask = student_mask[v].flatten(-2, -1)
-                    loss_p = torch.sum(loss_p * mask.float(),
-                                       dim=-1) / mask.sum(dim=-1).clamp(min=1.0)
-                    loss_patch += loss_p.mean()
-                    n_patch_loss_terms += 1
-
-            loss_patch = loss_patch / n_patch_loss_terms * self.lambda1
-            self.update_center(teacher_cls, teacher_patch)
-            loss += self.lamb_patch * loss_patch
-        else:
-            loss_patch = 0.0
-
-        std = self.std(teacher_cls)
+        std = self.std(z_teacher)
 
         loss_state = {
             'loss': loss,
@@ -478,7 +450,9 @@ class MSiamLoss(nn.Module):
         p = F.normalize(p, dim=1)
         return -(p*z).sum(dim=1).mean()
 
-    def neg(self, z, epoch=None, memory=None, pos_threshold=0.8):
+    def neg(self, z1, z2, epoch=None, memory=None, pos_threshold=0.8):
+        z = torch.cat((z1, z2), 0)
+
         batch_size = z.shape[0] // 2
         n_neg = z.shape[0] - 2
         z = F.normalize(z, dim=-1)
