@@ -29,6 +29,16 @@ def args_parser():
                         choices=['tieredImageNet', 'miniImageNet'], help='dataset')
     parser.add_argument('--num_workers', type=int,
                         default=1, help='num of workers to use')
+    parser.add_argument('--use_feature_align', default=False, type=bool_flag,
+                        help="Whether to use feature alignment")
+    parser.add_argument('--use_feature_align_teacher', default=False, type=bool_flag,
+                        help="Whether to use feature alignment on the teacher features")
+    parser.add_argument('--batch_size', type=int,
+                        default=256, help='batch_size')
+    parser.add_argument('--topk', default=5, type=int,
+                        help='Number of topk NN to extract, when enhancing the batch size (Default 5).')
+    parser.add_argument('--use_clustering', default=False, type=bool_flag,
+                        help="Whether to use online clustering")
 
     ######
     parser.add_argument('--out_dim', default=8192, type=int, help="""Dimensionality of
@@ -94,7 +104,7 @@ def args_parser():
 
 @torch.no_grad()
 def evaluate_fewshot(
-        encoder, use_transformers, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', power_norm=False):
+        encoder, use_transformers, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', power_norm=False, feature_extractor=None):
 
     encoder.eval()
 
@@ -105,13 +115,57 @@ def evaluate_fewshot(
         accs[f'{n_shot}-shot'] = []
 
     for idx, (images, _) in enumerate(tqdm(loader)):
+        if idx == 0:
+            print(images.size())
 
         images = images.cuda(non_blocking=True)
-        if use_transformers:
-            f = encoder(images)
-        else:
-            f = encoder(images)
-        # print(f.size())
+
+        f = encoder(images)
+
+        if feature_extractor != None:
+            x = f[:, :, None, None]
+            G = f.permute(1, 0)
+
+            w1 = feature_extractor.fe[0].weight.flatten(start_dim=1)
+            # only keep first TBS weights from first layer
+            # # pooling = nn.AdaptiveAvgPool2d((G.shape[1], 1))
+            pooling = nn.AdaptiveMaxPool2d((G.shape[1], 1))
+            w1 = pooling(w1[:, :, None]).flatten(start_dim=1)
+            # w1 = w1[:, :G.shape[1]]
+
+            w2 = feature_extractor.fe[2].weight.flatten(start_dim=1)
+
+            G = torch.matmul(G, w1.t())
+            G = feature_extractor.fe[1](G)
+            G = torch.matmul(G, w2.t())[:, :, None, None]
+            G = feature_extractor.fe[3](G)
+
+            xq = feature_extractor.f_q(G)
+            xk = feature_extractor.f_k(G)
+            xv = feature_extractor.f_v(G)
+
+            xq = xq.squeeze(dim=1).squeeze(dim=1).transpose(
+                0, 1).reshape(-1, x.shape[2], x.shape[3])
+            xk = xk.squeeze(dim=1).squeeze(dim=1).transpose(
+                0, 1).reshape(-1, x.shape[2], x.shape[3])
+            xv = xv.squeeze(dim=1).squeeze(dim=1).transpose(
+                0, 1).reshape(-1, x.shape[2], x.shape[3])
+
+            # Attention Block
+            xq = xq.reshape(xq.shape[0], xq.shape[1]*xq.shape[2])
+            xk = xk.reshape(xk.shape[0], xk.shape[1]*xk.shape[2])
+            xv = xv.reshape(xv.shape[0], xv.shape[1]*xv.shape[2])
+
+            G = torch.mm(xq, xk.transpose(0, 1)/xk.shape[1]**0.5)
+            softmax = nn.Softmax(dim=-1)
+            G = softmax(G)
+            G = torch.mm(G, xv)
+
+            # Transductive Mask transformed input
+            G = G.reshape(-1, x.shape[2], x.shape[3])
+            x = x * G
+            f = nn.Flatten()(x)
+
         # print(torch.mean(f, dim=1, keepdim=False).size())
         # print("Befor Normalization: {}".format(torch.isnan(f).any()))
         # print("Befor Normalization: {}".format(not torch.isfinite(f).any()))
@@ -202,7 +256,7 @@ def evaluate_msiam(args):
             model = teacher
 
         evaluate_fewshot(model.module.encoder, model.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
-            1, 5], n_query=args.n_query, classifier='LR', power_norm=True)
+            1, 5], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=model.module.feature_extractor)
 
         if "deit" in args.backbone:
             student.module.encoder.masked_im_modeling = True
@@ -214,8 +268,6 @@ if __name__ == '__main__':
         'MSiam evaluation arguments', parents=[args_parser()])
     args = parser.parse_args()
     # need to change that
-    args.use_feature_align = False
-    args.use_feature_align_teacher = False
     args.dist = False
 
     args.split_path = (Path(__file__).parent).joinpath('split')
