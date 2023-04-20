@@ -53,6 +53,8 @@ def args_parser():
     parser.add_argument('--w_ori', type=float,
                         default=1.0, help='weight of original features (in case of refinement)')
     parser.add_argument("--seed", type=int, default=31, help="seed")
+    parser.add_argument('--uniformity_config', type=str, default='ST',
+                        choices=['ST', 'SS', 'TT'], help='Choice of unifmormity configurations')
 
     # clustering
     parser.add_argument('--use_clustering', default=False, type=bool_flag,
@@ -246,11 +248,11 @@ def train_msiam(args):
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_W{}_{}".format(
+    local_runs = os.path.join("runs", "N_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_W{}_{}_{}_{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
         args.topk, args.use_memory_in_loss, args.use_feature_align,
-        args.use_feature_align_teacher, args.lamb_neg, suffix))
+        args.use_feature_align_teacher, args.lamb_neg, args.uniformity_config, suffix, args.seed))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
     writer = SummaryWriter(log_dir=local_runs)
@@ -435,30 +437,34 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                 p_refined = None
                 z_refined = None
 
-                p, p_dist, s_prototypes = student(masked_images)
-                z, t_prototypes = teacher(images)
+                # pass images from student/teacher encoders
+                p, z_student, f_student, p_dist, s_prototypes = student(
+                    masked_images)
+                z_teacher, f_teacher, t_prototypes = teacher(images)
+
                 # replace teacher features with NN if NNCLR is activated
                 if args.use_nnclr:
-                    z = teacher_nn_replacer(
-                        z.detach(), epoch, args, k=args.topk, update=True)
+                    z_teacher = teacher_nn_replacer(
+                        z_teacher.detach(), epoch, args, k=args.topk, update=True)
 
                 # concat the features of top-5 neighbors for both student &
                 # teacher if batch size increase is activated
                 if args.enhance_batch:
-                    z = teacher_nn_replacer.get_top_kNN(
-                        z.detach(), epoch, args, k=args.topk, update=True)
-                    p = student_nn_replacer.get_top_kNN(
-                        p, epoch, args, k=args.topk, update=True)
+                    z_teacher = teacher_nn_replacer.get_top_kNN(
+                        z_teacher.detach(), epoch, args, k=args.topk, update=True)
+                    # p = student_nn_replacer.get_top_kNN(
+                    #     p, epoch, args, k=args.topk, update=True)
+                    z_student = student_nn_replacer.get_top_kNN(
+                        z_student, epoch, args, k=args.topk, update=True)
+                    p = student.module.proj(z_student)
 
                     # apply feature alignment
                     if args.use_feature_align:
-                        f_refined = student.module.feature_extractor(p)
-                        z_refined = student.module.proj_align(f_refined)
+                        z_refined = student.module.feature_extractor(z_student)
                         p_refined = student.module.pred_align(z_refined)
 
                     if args.use_feature_align_teacher:
-                        f_refined = teacher.module.feature_extractor(z)
-                        z_refined = teacher.module.proj_align(f_refined)
+                        z_refined = teacher.module.feature_extractor(z_teacher)
 
                 if args.use_clustering:
                     cluster_loss = swav_loss(args, s_prototypes, t_prototypes, student,
@@ -466,7 +472,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                                              teacher_nn_replacer)
 
                 loss_state = msiam_loss(
-                    z, p, args,
+                    z_teacher, p, z_student, args,
                     p_refined=p_refined,
                     z_refined=z_refined,
                     epoch=epoch,
