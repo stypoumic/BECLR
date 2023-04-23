@@ -314,7 +314,7 @@ class MSiam(nn.Module):
 
                 # get prototypes
                 if self.prototypes != None:
-                    prototypes = self.prototypes(f)
+                    prototypes = self.prototypes(z)
                 else:
                     prototypes = None
 
@@ -324,7 +324,7 @@ class MSiam(nn.Module):
 
                 # get prototypes
                 if self.prototypes != None:
-                    prototypes = self.prototypes(f)
+                    prototypes = self.prototypes(z)
                 else:
                     prototypes = None
 
@@ -395,7 +395,7 @@ class MSiamLoss(nn.Module):
             z1 = z1_s
             if args.uniformity_config == "SS":
                 z2 = z2_s
- 
+
         if self.args.use_memory_in_loss:
             loss_neg = self.neg(z1, z2, epoch, memory, args.pos_threshold)
         else:
@@ -507,6 +507,8 @@ def swav_loss(args, student_out, teacher_out, student, teacher, s_memory, t_memo
         code_predict(args, p2, s_memory, student, z1)
     loss /= 4
 
+    return loss
+
 
 def code_predict(args, output, memory, model, x):
     # concat to output X embeddings from memory
@@ -515,17 +517,17 @@ def code_predict(args, output, memory, model, x):
 
     # load memory
     bank = memory.bank.cuda()
+
     # get N random embeddings from memory
     indices = torch.randperm(bank.shape[1])[:N]
     # multiply with prototypes weights to get memory prototypes
     memory_prototypes = torch.mm(
         bank[:, indices].T, model.module.prototypes.weight.t())
     # concat with orignal prototypes from original features
-    output = torch.cat((output, memory_prototypes), 0)
+    output = torch.cat((memory_prototypes, output), 0)
 
     # get assignments (only for bs)
     q = distributed_sinkhorn(output, args)[-bs:]
-    exit()
 
     # cluster assignment prediction
     return -torch.mean(torch.sum(q * F.log_softmax(x, dim=1), dim=1))
@@ -535,18 +537,18 @@ def code_predict(args, output, memory, model, x):
 def distributed_sinkhorn(out, args):
     # Q is K-by-B for consistency with notations from our paper
     Q = torch.exp(out / args.epsilon).t()
-    B = Q.shape[1] * args.world_size  # number of samples to assign
+    B = Q.shape[1]   # number of samples to assign
     K = Q.shape[0]  # how many prototypes
 
     # make the matrix sums to 1
     sum_Q = torch.sum(Q)
-    dist.all_reduce(sum_Q)
+    # dist.all_reduce(sum_Q)
     Q /= sum_Q
 
     for it in range(args.sinkhorn_iterations):
         # normalize each row: total weight per prototype must be 1/K
         sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
-        dist.all_reduce(sum_of_rows)
+        # dist.all_reduce(sum_of_rows)
         Q /= sum_of_rows
         Q /= K
 
