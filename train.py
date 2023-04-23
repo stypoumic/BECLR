@@ -59,6 +59,8 @@ def args_parser():
     # clustering
     parser.add_argument('--use_clustering', default=False, type=bool_flag,
                         help="Whether to use online clustering")
+    parser.add_argument('--w_clustering', type=float,
+                        default=0.2, help='weight of clustering loss')
     parser.add_argument("--sinkhorn_iterations", default=3, type=int,
                         help="number of iterations in Sinkhorn-Knopp algorithm")
     parser.add_argument("--nmb_prototypes", default=3000, type=int,
@@ -67,9 +69,7 @@ def args_parser():
                         help="freeze the prototypes during this many iterations from the start")
     parser.add_argument("--epsilon", default=0.05, type=float,
                         help="regularization parameter for Sinkhorn-Knopp algorithm")
-    parser.add_argument("--world_size", default=2, type=int, help="""
-                    number of processes: it is set automatically and
-                    should not be passed as argument""")
+
 
     # memory
     parser.add_argument('--topk', default=5, type=int,
@@ -242,13 +242,14 @@ def train_msiam(args):
     # ============ preparing memory queue ... ============
     teacher_nn_replacer = NNmemoryBankModule(size=2 ** 16)
     student_nn_replacer = NNmemoryBankModule(size=2 ** 16)
+    student_f_nn_replacer = NNmemoryBankModule(size=2 ** 16)
 
     suffix = ""
     if args.use_nnclr:
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "N_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_W{}_{}_{}_{}".format(
+    local_runs = os.path.join("runs", "M_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_W{}_{}_{}_{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
         args.topk, args.use_memory_in_loss, args.use_feature_align,
@@ -312,7 +313,7 @@ def train_msiam(args):
         # ============ training one epoch of MSiam ... ============
         loss = train_one_epoch(data_loader, student, teacher, optimizer, fp16_scaler, epoch,
                                lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss,
-                               args, teacher_nn_replacer, student_nn_replacer, distil_model)
+                               args, teacher_nn_replacer, student_nn_replacer, student_f_nn_replacer, distil_model)
         time2 = time.time()
 
         print('epoch {}, total time {:.2f}'.format(epoch+1, time2 - time1))
@@ -350,7 +351,7 @@ def train_msiam(args):
 
 def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoch,
                     lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss,
-                    args, teacher_nn_replacer, student_nn_replacer, distil_model=None):
+                    args, teacher_nn_replacer, student_nn_replacer, student_f_nn_replacer=None, distil_model=None):
     """one epoch training"""
     student.train()
 
@@ -447,16 +448,15 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     z_teacher = teacher_nn_replacer(
                         z_teacher.detach(), epoch, args, k=args.topk, update=True)
 
-                # concat the features of top-5 neighbors for both student &
+                # concat the features of top-k neighbors for both student &
                 # teacher if batch size increase is activated
                 if args.enhance_batch:
                     z_teacher = teacher_nn_replacer.get_top_kNN(
                         z_teacher.detach(), epoch, args, k=args.topk, update=True)
-                    # p = student_nn_replacer.get_top_kNN(
-                    #     p, epoch, args, k=args.topk, update=True)
-                    z_student = student_nn_replacer.get_top_kNN(
+                    p = student_nn_replacer.get_top_kNN(
+                        p, epoch, args, k=args.topk, update=True)
+                    z_student = student_f_nn_replacer.get_top_kNN(
                         z_student, epoch, args, k=args.topk, update=True)
-                    p = student.module.proj(z_student)
 
                     # apply feature alignment
                     if args.use_feature_align:
@@ -465,11 +465,6 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
 
                     if args.use_feature_align_teacher:
                         z_refined = teacher.module.feature_extractor(z_teacher)
-
-                if args.use_clustering:
-                    cluster_loss = swav_loss(args, s_prototypes, t_prototypes, student,
-                                             teacher, student_nn_replacer,
-                                             teacher_nn_replacer)
 
                 loss_state = msiam_loss(
                     z_teacher, p, z_student, args,
@@ -481,7 +476,14 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     w_ori=args.w_ori,
                     memory=teacher_nn_replacer.bank.cuda())
 
-        loss = loss_state['loss']
+                if args.use_clustering:
+                    cluster_loss = swav_loss(args, s_prototypes, t_prototypes, student,
+                                             teacher, student_f_nn_replacer,
+                                             teacher_nn_replacer)
+                else:
+                    cluster_loss = 0
+
+        loss = loss_state['loss'] + args.w_clustering * cluster_loss
         # student update
         optimizer.zero_grad()
         param_norms = None
