@@ -9,6 +9,7 @@ from transform.build_transform import DataAugmentationMSiam
 from evaluate import evaluate_fewshot
 from dataset.mask_loader import ImageFolderMask
 import numpy as np
+import math
 from tqdm import tqdm
 from pathlib import Path
 import torch.backends.cudnn as cudnn
@@ -69,7 +70,6 @@ def args_parser():
                         help="freeze the prototypes during this many iterations from the start")
     parser.add_argument("--epsilon", default=0.05, type=float,
                         help="regularization parameter for Sinkhorn-Knopp algorithm")
-
 
     # memory
     parser.add_argument('--topk', default=5, type=int,
@@ -249,11 +249,12 @@ def train_msiam(args):
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "M_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_W{}_{}_{}_{}".format(
+    local_runs = os.path.join("runs", "A_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_UC_{}{}-{}_W{}_{}_{}_{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
         args.topk, args.use_memory_in_loss, args.use_feature_align,
-        args.use_feature_align_teacher, args.lamb_neg, args.uniformity_config, suffix, args.seed))
+        args.use_feature_align_teacher, args.use_clustering, args.nmb_prototypes, args.w_clustering,
+        args.lamb_neg, args.uniformity_config, suffix, args.seed))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
     writer = SummaryWriter(log_dir=local_runs)
@@ -364,6 +365,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
     loss_dist_hist = AverageMeter()
     loss_pos_ref_hist = AverageMeter()
     std_hist = AverageMeter()
+    loss_cluster_hist = AverageMeter()
 
     end = time.time()
 
@@ -476,10 +478,13 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     w_ori=args.w_ori,
                     memory=teacher_nn_replacer.bank.cuda())
 
-                if args.use_clustering:
+                if args.use_clustering and epoch > args.memory_start_epoch:
                     cluster_loss = swav_loss(args, s_prototypes, t_prototypes, student,
                                              teacher, student_f_nn_replacer,
                                              teacher_nn_replacer)
+                    cluster_loss = 0 if math.isnan(
+                        cluster_loss) else cluster_loss
+
                 else:
                     cluster_loss = 0
 
@@ -514,6 +519,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
 
         # logging
         loss_hist.update(loss.item(), bsz)
+        loss_cluster_hist.update(cluster_loss.item(), bsz)
         loss_pos_hist.update(loss_state["loss_pos"].item(), bsz)
         loss_neg_hist.update(loss_state["loss_neg"].item(), bsz)
         if args.dist:
@@ -537,11 +543,12 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                   'loss_patch {losspa.val:.3f} ({losspa.avg:.3f})\t'
                   'loss_dist {lossdist.val:.3f} ({lossdist.avg:.3f})\t'
                   'loss_pos_ref {losspref.val:.3f} ({losspref.avg:.3f})\t'
+                  'loss_pos_ref {losscluster.val:.3f} ({losscluster.avg:.3f})\t'
                   'std {std.val:.3f} ({std.avg:.3f})'.format(
                       epoch + 1, global_it + 1 - epoch * len(train_loader), len(train_loader), batch_time=batch_time,
                       data_time=data_time, loss=loss_hist, lossp=loss_pos_hist,
                       lossn=loss_neg_hist, losspa=loss_patch_hist, lossdist=loss_dist_hist,
-                      losspref=loss_pos_ref_hist, std=std_hist))
+                      losspref=loss_pos_ref_hist, losscluster=loss_cluster_hist, std=std_hist))
             sys.stdout.flush()
 
     # log weight gradients
@@ -562,6 +569,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
     writer.add_scalar("Learning Rate", _new_lr, epoch+1)
     writer.add_scalar("Weight Decay", _new_wd, epoch+1)
     writer.add_scalar("Weight Gradient Average", grad_stats.avg, epoch+1)
+    writer.add_scalar("Cluster Loss", loss_cluster_hist.avg, epoch+1)
     writer.flush()
 
     return loss_hist.avg
