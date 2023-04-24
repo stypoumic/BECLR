@@ -512,7 +512,7 @@ def swav_loss(args, student_out, teacher_out, student, teacher, s_memory, t_memo
 
 def code_predict(args, output, memory, model, x):
     # concat to output X embeddings from memory
-    N = 20 * args.batch_size
+    N = 4 * args.batch_size
     bs = output.shape[0]
 
     # load memory
