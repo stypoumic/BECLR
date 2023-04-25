@@ -4,7 +4,7 @@ from models.msiam import MSiamLoss, swav_loss
 from utils import get_params_groups, get_world_size, clip_gradients, \
     cancel_gradients_last_layer, build_fewshot_loader, load_distil_model, build_student_teacher
 from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher, fix_random_seeds
-from memory import NNmemoryBankModule
+from memory import NNmemoryBankModule, NNmemoryBankModule2
 from transform.build_transform import DataAugmentationMSiam
 from evaluate import evaluate_fewshot
 from dataset.mask_loader import ImageFolderMask
@@ -85,6 +85,15 @@ def args_parser():
     parser.add_argument('--pos_threshold', default=0.8, type=float,
                         help="""When the cosine similarity of 2 embeddings is above this threshold, 
                         they are treated as positives, and masked out from the uniformity loss""")
+
+    parser.add_argument('--cluster_freq', type=int,
+                        default=20, help='memory clustering frequency')
+    parser.add_argument('--num_clusters', type=int,
+                        default=200, help='number of memory clusters')
+    parser.add_argument('--cluster_algo', type=str, default='kmeans',
+                        choices=['kmeans', 'hdbscan'], help='Choice of clustering algorithm')
+    parser.add_argument('--sim_threshold', type=float,
+                        default=0.6, help='similarity threshold')
 
     ######
     parser.add_argument('--out_dim', default=512, type=int, help="""Dimensionality of
@@ -240,20 +249,21 @@ def train_msiam(args):
                            temp=args.temp).cuda()
 
     # ============ preparing memory queue ... ============
-    teacher_nn_replacer = NNmemoryBankModule(size=2 ** 16)
-    student_nn_replacer = NNmemoryBankModule(size=2 ** 16)
-    student_f_nn_replacer = NNmemoryBankModule(size=2 ** 16)
+    # 2 ** 16
+    teacher_nn_replacer = NNmemoryBankModule2(size=20*args.num_clusters)
+    student_nn_replacer = NNmemoryBankModule2(size=20*args.num_clusters)
+    student_f_nn_replacer = NNmemoryBankModule2(size=20*args.num_clusters)
 
     suffix = ""
     if args.use_nnclr:
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "A_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_UC_{}{}-{}_W{}_{}_{}_{}".format(
+    local_runs = os.path.join("runs", "B_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}-{}_W{}_{}_{}_{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
         args.topk, args.use_memory_in_loss, args.use_feature_align,
-        args.use_feature_align_teacher, args.use_clustering, args.nmb_prototypes, args.w_clustering,
+        args.use_feature_align_teacher, args.cluster_algo, args.num_clusters, args.cluster_freq, args.sim_threshold,
         args.lamb_neg, args.uniformity_config, suffix, args.seed))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
@@ -519,7 +529,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
 
         # logging
         loss_hist.update(loss.item(), bsz)
-        loss_cluster_hist.update(cluster_loss.item(), bsz)
+        loss_cluster_hist.update(cluster_loss, bsz)
         loss_pos_hist.update(loss_state["loss_pos"].item(), bsz)
         loss_neg_hist.update(loss_state["loss_neg"].item(), bsz)
         if args.dist:
@@ -543,7 +553,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                   'loss_patch {losspa.val:.3f} ({losspa.avg:.3f})\t'
                   'loss_dist {lossdist.val:.3f} ({lossdist.avg:.3f})\t'
                   'loss_pos_ref {losspref.val:.3f} ({losspref.avg:.3f})\t'
-                  'loss_pos_ref {losscluster.val:.3f} ({losscluster.avg:.3f})\t'
+                  'loss_cluster {losscluster.val:.3f} ({losscluster.avg:.3f})\t'
                   'std {std.val:.3f} ({std.avg:.3f})'.format(
                       epoch + 1, global_it + 1 - epoch * len(train_loader), len(train_loader), batch_time=batch_time,
                       data_time=data_time, loss=loss_hist, lossp=loss_pos_hist,
