@@ -152,14 +152,21 @@ def clusterer(z, algo='kmeans', n_clusters=5, metric='euclidean', hdb_min_cluste
 class NNmemoryBankModule2(MemoryBankModule):
     def __init__(self, size: int = 2 ** 16):
         super(NNmemoryBankModule2, self).__init__(size)
-        self.clusters = None
-        self.labels = None
+        # register_buffer => Tensor which is not a parameter, but should be part of the modules state.
+        # Used for tensors that need to be on the same device as the module.
+        # persistent=False tells PyTorch to not add the buffer to the state dict (e.g. when we save the model)
+        self.register_buffer(
+            "centers", tensor=torch.empty(0, dtype=torch.float), persistent=False
+        )
+        self.register_buffer(
+            "labels", tensor=torch.empty(0, dtype=torch.long), persistent=False
+        )
         self.start_clustering = False
         self.last_cluster_epoch = 0
     
     def cluster_memory_embeddings(self, cluster_algo="kmeans", num_clusters=300, 
                 min_cluster_size = 4, rerank=False ):
-        bank = self.bank.T
+        bank = self.bank.T.detach()
         
         bank_np = F.normalize(bank.detach()).cpu().numpy()
         
@@ -203,27 +210,26 @@ class NNmemoryBankModule2(MemoryBankModule):
             self.labels = labels 
 
 
-    
+    @torch.no_grad()
     def add_memory_embdeddings(self,
-                z: torch.Tensor, sim_threshold=0.6, topk=3):
-        bank = self.bank.clone().detach().cuda()
-        centers = self.centers.clone().detach().cuda()
-        labels = self.labels.clone().detach().cuda()
+                z: torch.Tensor, bank, sim_threshold=0.6, topk=3):
+        centers = self.centers.clone().cuda()
+        labels = self.labels.clone().cuda()
 
         # Normalize batch & memory embeddings
         z_normed = torch.nn.functional.normalize(z, dim=1)
-        canters_normed = torch.nn.functional.normalize(centers, dim=1)
+        centers = torch.nn.functional.normalize(centers, dim=1)
         bank_normed = torch.nn.functional.normalize(bank, dim=0).T
 
         # create similarity matrix between batch embeddings & cluster centers
         z_center_similarity_matrix = torch.einsum(
-            "nd,md->nm", z_normed, canters_normed)
+            "nd,md->nm", z_normed, centers)
 
         if z_center_similarity_matrix.shape[1] < topk:
             topk = z_center_similarity_matrix.shape[1]
 
         # find top3 cluster centers for each batch embedding
-        _, topk_clusters = torch.topk(z_center_similarity_matrix, topk, dim=1) 
+        _, topk_clusters = torch.topk(z_center_similarity_matrix, topk, dim=1)
         #--------------vectorized
         for i in range(topk_clusters.shape[0]):
             clusters = topk_clusters[i,:]
@@ -241,8 +247,6 @@ class NNmemoryBankModule2(MemoryBankModule):
             if sim.squeeze().float() > sim_threshold:
                 index = indices[top1.squeeze()]
                 self.bank[:, index] = z[i,:].unsqueeze(0)
-
-        return z, bank
 
     def forward(self,
                 output: torch.Tensor,
@@ -271,9 +275,10 @@ class NNmemoryBankModule2(MemoryBankModule):
                 self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
                 self.last_cluster_epoch = epoch
 
+            bank = self.bank.clone().cuda().detach()
             # Add latest batch to the memory queue based on their most similar memory cluster centers
-            z1 , bank = self.add_memory_embdeddings(z1, sim_threshold=args.sim_threshold)
-
+            self.add_memory_embdeddings(z1, bank, sim_threshold=args.sim_threshold)
+           
         else:
             # Add latest batch to the memory queue (update memory only from 1st view)
             z1, bank = super(NNmemoryBankModule2, self).forward(
@@ -344,9 +349,14 @@ class NNmemoryBankModule2(MemoryBankModule):
             elif self.start_clustering == True and epoch % args.cluster_freq == 0 and epoch != self.last_cluster_epoch:
                 self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
                 self.last_cluster_epoch = epoch
+                print("--Memory Size--: {}-------\n".format(self.bank.size()))
+                print("--Labels Size--: {}-------\n".format(self.labels.size()))
+                print("--Clusters Size--: {}-------\n".format(self.centers.size()))
+                print("PTR: {}--\n".format(ptr))
 
+            bank = self.bank.clone().cuda().detach()
             # Add latest batch to the memory queue based on their most similar memory cluster centers
-            z1 , bank = self.add_memory_embdeddings(z1, sim_threshold=args.sim_threshold)
+            self.add_memory_embdeddings(z1, bank, sim_threshold=args.sim_threshold)
 
         else:
             # Add latest batch to the memory queue (update memory only from 1st view)
