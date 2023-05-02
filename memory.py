@@ -3,6 +3,8 @@ from lightly.loss.memory_bank import MemoryBankModule
 from sklearn import cluster
 import hdbscan
 import torch.nn.functional as F
+from utils import visualize_memory_embeddings
+import numpy as np
 
 
 class NNmemoryBankModule(MemoryBankModule):
@@ -146,13 +148,16 @@ def clusterer(z, algo='kmeans', n_clusters=5, metric='euclidean', hdb_min_cluste
     return clf, predicted_labels, probs
 
 
+    
 
 class NNmemoryBankModule2(MemoryBankModule):
-    def __init__(self, size: int = 2 ** 16):
+    def __init__(self, size: int = 2 ** 16, origin: str = None):
         super(NNmemoryBankModule2, self).__init__(size)
-        # register_buffer => Tensor which is not a parameter, but should be part of the modules state.
+        # register_buffer => Tensor which is not a parameter, but should be part
+        #  of the modules state.
         # Used for tensors that need to be on the same device as the module.
-        # persistent=False tells PyTorch to not add the buffer to the state dict (e.g. when we save the model)
+        # persistent=False tells PyTorch to not add the buffer to the state dict 
+        # (e.g. when we save the model)
         self.register_buffer(
             "centers", tensor=torch.empty(0, dtype=torch.float), persistent=False
         )
@@ -163,6 +168,11 @@ class NNmemoryBankModule2(MemoryBankModule):
         self.last_cluster_epoch = 0
         self.topk1 = 3
         self.topk2 = 3
+        self.origin = origin
+    
+    def load_memory_bank(self, bank: torch.Tensor, ptr: torch.long):
+        self.bank = bank
+        self.ptr = ptr
     
     def cluster_memory_embeddings(self, cluster_algo="kmeans", num_clusters=300, 
                 min_cluster_size = 4, rerank=False ):
@@ -338,13 +348,6 @@ class NNmemoryBankModule2(MemoryBankModule):
         z1, z2 = torch.split(
             output, [bsz, bsz], dim=0)
         
-
-        #########################################
-        z1, bank = super(NNmemoryBankModule2, self).forward(
-                z1, labels, update)
-        ptr = self.size  ############# REMOVE###########################
-
-
         # if memory is full
         if ptr + bsz >= self.size:
             # cluster memory embeddings for the first time
@@ -352,17 +355,26 @@ class NNmemoryBankModule2(MemoryBankModule):
                 self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
                 self.start_clustering = True
 
-                #####################
-                visualize_memory_embeddings(np.array(self.bank.T.detach().cpu()),np.array(self.labels.detach().cpu()), args.num_clusters)
+                # Visualize memory embeddings using tSNE
+                if self.origin == "teacher" or self.origin == "student":
+                    visualize_memory_embeddings(np.array(self.bank.T.detach().cpu()),
+                                                np.array(self.labels.detach().cpu()), 
+                                                args.num_clusters, args.save_path, 
+                                                origin=self.origin, epoch=epoch)
             
             # cluster memory embeddings every args.cluster_freq epochs
             elif self.start_clustering == True and epoch % args.cluster_freq == 0 and epoch != self.last_cluster_epoch:
                 self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
                 self.last_cluster_epoch = epoch
-                print("--Memory Size--: {}-------\n".format(self.bank.size()))
-                print("--Unique Labels Counts--: {}-------\n".format(self.labels.unique(return_counts=True)))
                 print("--Clusters Size--: {}-------\n".format(self.centers.size()))
-                print("PTR: {}--\n".format(ptr))
+                print("--Unique Labels Counts--: {}-------\n".format(self.labels.unique(return_counts=True)))
+                
+                # Visualize memory embeddings using tSNE
+                if self.origin == "teacher" or self.origin == "student":
+                    visualize_memory_embeddings(np.array(self.bank.T.detach().cpu()),
+                                                np.array(self.labels.detach().cpu()), 
+                                                args.num_clusters, args.save_path, 
+                                                origin=self.origin, epoch=epoch)
 
             bank = self.bank.clone().cuda().detach()
             # Add latest batch to the memory queue based on their most similar memory cluster centers

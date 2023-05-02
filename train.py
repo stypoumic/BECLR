@@ -250,16 +250,19 @@ def train_msiam(args):
 
     # ============ preparing memory queue ... ============
     # 2 ** 16
-    teacher_nn_replacer = NNmemoryBankModule2(size=10*args.num_clusters)
-    student_nn_replacer = NNmemoryBankModule2(size=10*args.num_clusters)
-    student_f_nn_replacer = NNmemoryBankModule2(size=10*args.num_clusters)
+    teacher_nn_replacer = NNmemoryBankModule2(
+        size=10*args.num_clusters, origin="teacher")
+    student_nn_replacer = NNmemoryBankModule2(
+        size=10*args.num_clusters, origin="student")
+    student_f_nn_replacer = NNmemoryBankModule2(
+        size=10*args.num_clusters, origin="student_f")
 
     suffix = ""
     if args.use_nnclr:
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "1_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}-{}_W{}_{}_{}_{}".format(
+    local_runs = os.path.join("runs", "2_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}-{}_W{}_{}_{}_{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
         args.topk, args.use_memory_in_loss, args.use_feature_align,
@@ -312,7 +315,9 @@ def train_msiam(args):
     # ============ Load checkpoint ... ============
     if args.ckpt_path is not None:
         student, teacher, optimizer, fp16_scaler, start_epoch, loss, batch_size = load_student_teacher(
-            student, teacher, ckpt_path=args.ckpt_path, optimizer=optimizer, fp16_scaler=fp16_scaler, )
+            student, teacher, args.ckpt_path, teacher_nn_replacer,
+            student_nn_replacer, student_f_nn_replacer, optimizer=optimizer,
+            fp16_scaler=fp16_scaler)
 
     start_time = time.time()
     print("Starting MSiam training!")
@@ -334,7 +339,9 @@ def train_msiam(args):
             save_file = os.path.join(
                 args.save_path, 'epoch_{}.pth'.format(epoch + 1))
             save_student_teacher(student, teacher, epoch + 1, loss,
-                                 optimizer, batch_size, save_file, fp16_scaler=fp16)
+                                 optimizer, batch_size, save_file, teacher_nn_replacer,
+                                 student_nn_replacer, student_f_nn_replacer,
+                                 fp16_scaler=fp16)
 
         # evaluate test performance every 50 epochs
         if (epoch) % args.eval_freq == 0 and epoch > 0:

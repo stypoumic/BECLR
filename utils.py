@@ -18,6 +18,43 @@ from dataset.sampler import EpisodeSampler
 from models.msiam import MSiam
 from models import resnet10, resnet18, resnet34, resnet50, vit_tiny
 
+from sklearn.manifold import TSNE
+from matplotlib import cm
+import matplotlib.pyplot as plt
+import numpy as np
+import pickle
+from pathlib import Path
+
+
+def visualize_memory_embeddings(memory: torch.Tensor, labels: torch.Tensor,
+                                num_clusters: int, save_path: str,
+                                epoch: int, origin: str):
+    tsne = TSNE(n_components=3, verbose=1)
+    tsne_proj = tsne.fit_transform(memory)
+
+    cmap = cm.get_cmap('gist_rainbow')
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.set_prop_cycle(color=[cmap(1.*i/num_clusters)
+                      for i in range(num_clusters)])
+
+    for lab in range(num_clusters):
+        indices = labels == lab
+        ax.scatter(tsne_proj[indices, 0],
+                   tsne_proj[indices, 1],
+                   tsne_proj[indices, 2],
+                   label=lab,
+                   alpha=0.5)
+    # plt.show()
+
+    save_path = Path(save_path) / Path(origin)
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    plt.savefig(save_path / Path("E_"+str(epoch)+".png"))
+    pickle.dump(fig, open(save_path / Path("E_"+str(epoch)+".pickle"), 'wb'))
+    # figx = pickle.load(open('FigureObject.fig.pickle', 'rb'))
+    # figx.show() # Show the figure, edit it, etc.!
+
 
 def init_distributed_mode(args):
     # launched with torch.distributed.launch
@@ -91,6 +128,7 @@ def has_batchnorms(model):
         if isinstance(module, bn_types):
             return True
     return False
+
 
 def fix_random_seeds(seed=31):
     """
@@ -376,7 +414,9 @@ def save_model(model, epoch, loss, optimizer, batch_size, save_file, fp16_scaler
     del save_state
 
 
-def save_student_teacher(student, teacher, epoch, loss, optimizer, batch_size, save_file, fp16_scaler=None):
+def save_student_teacher(student, teacher, epoch, loss, optimizer, batch_size,
+                         save_file, teacher_memory, student_memory,
+                         student_proj_memory, fp16_scaler=None):
     print('==> Saving... \n')
     save_state = {
         'student': student.state_dict(),
@@ -385,7 +425,10 @@ def save_student_teacher(student, teacher, epoch, loss, optimizer, batch_size, s
         'loss': loss,
         'optimizer': optimizer.state_dict(),
         'batch_size': batch_size,
-        'fp16_scaler': fp16_scaler
+        'fp16_scaler': fp16_scaler,
+        'teacher_memory': (teacher_memory.bank, teacher_memory.bank_ptr),
+        'student_memory': (student_memory.bank, student_memory.bank_ptr),
+        'student_proj_memory': (student_proj_memory.bank, student_proj_memory.bank_ptr)
     }
     torch.save(save_state, save_file)
     del save_state
@@ -451,7 +494,9 @@ def load_model(model, optimizer, fp16_scaler, ckpt_path):
     return model, optimizer, fp16_scaler, epoch, loss, batch_size
 
 
-def load_student_teacher(student, teacher, ckpt_path, optimizer=None, fp16_scaler=None):
+def load_student_teacher(student, teacher, ckpt_path, teacher_memory=None,
+                          student_memory=None, student_proj_memory=None, 
+                          optimizer=None, fp16_scaler=None):
     print('==> Loading... \n')
     # open checkpoint file
 
@@ -466,6 +511,13 @@ def load_student_teacher(student, teacher, ckpt_path, optimizer=None, fp16_scale
     optimizer.load_state_dict(checkpoint['optimizer'])
     if fp16_scaler is not None:
         fp16_scaler.load_state_dict(checkpoint['fp16_scaler'])
+
+    teacher_memory.load_memory_bank(
+        checkpoint['teacher_memory'][0], checkpoint['teacher_memory'][1])
+    student_memory.load_memory_bank(
+        checkpoint['student_memory'][0], checkpoint['student_memory'][1])
+    student_proj_memory.load_memory_bank(
+        checkpoint['student_proj_memory'][0], checkpoint['student_proj_memory'][1])
 
     del checkpoint
     return student, teacher, optimizer, fp16_scaler, epoch, loss, batch_size
