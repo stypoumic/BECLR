@@ -250,12 +250,14 @@ def train_msiam(args):
 
     # ============ preparing memory queue ... ============
     # 2 ** 16
+    memory_size = (10*args.num_clusters //
+                   args.batch_size + 1) * args.batch_size + 1
     teacher_nn_replacer = NNmemoryBankModule2(
-        size=10*args.num_clusters, origin="teacher")
+        size=memory_size, origin="teacher")
     student_nn_replacer = NNmemoryBankModule2(
-        size=10*args.num_clusters, origin="student")
+        size=memory_size, origin="student")
     student_f_nn_replacer = NNmemoryBankModule2(
-        size=10*args.num_clusters, origin="student_f")
+        size=memory_size, origin="student_f")
 
     suffix = ""
     if args.use_nnclr:
