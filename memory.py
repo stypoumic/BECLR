@@ -347,7 +347,7 @@ class NNmemoryBankModule2(MemoryBankModule):
         bsz = output.shape[0] // 2
         z1, z2 = torch.split(
             output, [bsz, bsz], dim=0)
-        
+     
         # if memory is full
         if ptr + bsz >= self.size:
             # cluster memory embeddings for the first time
@@ -401,6 +401,12 @@ class NNmemoryBankModule2(MemoryBankModule):
             z1, z2 = torch.split(
                 output_normed, [args.batch_size, args.batch_size], dim=0)
             
+            # create similarity matrix between batch & memory embeddings
+            similarity_matrix1 = torch.einsum(
+                "nd,md->nm", z1, bank_normed)
+            similarity_matrix2 = torch.einsum(
+                "nd,md->nm", z2, bank_normed)
+            
             # if clustering is used for memory upating, use clustering for NN selection as well
             if use_clustering:
                 centers = self.centers.clone().cuda()
@@ -440,10 +446,25 @@ class NNmemoryBankModule2(MemoryBankModule):
                         "nd,md->nm", z1[i,:].unsqueeze(0), bank_normed[indices_1, :])
                     z_memory_similarity_matrix_2 = torch.einsum(
                         "nd,md->nm", z2[i,:].unsqueeze(0), bank_normed[indices_2, :])
-                    
+
                     # find indices of topk NN for each view
-                    _, topk_indices_1 = torch.topk(z_memory_similarity_matrix_1, k, dim=1)
-                    _, topk_indices_2 = torch.topk(z_memory_similarity_matrix_2, k, dim=1)
+                    if z_memory_similarity_matrix_1.dim() < 2:
+                        _, topk_indices_1 = torch.topk(similarity_matrix1[i, :], k, dim=0)
+                        topk_indices_1 = topk_indices_1.unsqueeze(0)
+                    elif z_memory_similarity_matrix_1.shape[1] <= k:
+                        _, topk_indices_1 = torch.topk(similarity_matrix1[i, :], k, dim=0)
+                        topk_indices_1 = topk_indices_1.unsqueeze(0)
+                    else:
+                        _, topk_indices_1 = torch.topk(z_memory_similarity_matrix_1, k, dim=1)
+
+                    if z_memory_similarity_matrix_2.dim() < 2:
+                        _, topk_indices_2 = torch.topk(similarity_matrix2[i, :], k, dim=0)
+                        topk_indices_2 = topk_indices_2.unsqueeze(0)
+                    elif z_memory_similarity_matrix_2.shape[1] < k:
+                        _, topk_indices_2 = torch.topk(similarity_matrix2[i, :], k, dim=0)
+                        topk_indices_2 = topk_indices_2.unsqueeze(0)
+                    else:
+                        _, topk_indices_2 = torch.topk(z_memory_similarity_matrix_2, k, dim=1)
                     
                     # concat topk NN embeddings to original embeddings for each view
                     for j in range(k):
@@ -455,12 +476,6 @@ class NNmemoryBankModule2(MemoryBankModule):
                 # concat the embeddings of the 2 views
                 z = torch.cat((z1_final, z2_final), 0)
             else:
-                # create similarity matrix between batch & memory embeddings
-                similarity_matrix1 = torch.einsum(
-                    "nd,md->nm", z1, bank_normed)
-                similarity_matrix2 = torch.einsum(
-                    "nd,md->nm", z2, bank_normed)
-
                 # find indices of topk NN for each view
                 _, topk_indices_1 = torch.topk(similarity_matrix1, k, dim=1)
                 _, topk_indices_2 = torch.topk(similarity_matrix2, k, dim=1)
