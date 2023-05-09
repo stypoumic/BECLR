@@ -314,7 +314,7 @@ class MSiam(nn.Module):
 
                 # get prototypes
                 if self.prototypes != None:
-                    prototypes = self.prototypes(z)
+                    prototypes = self.prototypes(p)
                 else:
                     prototypes = None
 
@@ -542,13 +542,15 @@ def distributed_sinkhorn(out, args):
 
     # make the matrix sums to 1
     sum_Q = torch.sum(Q)
-    # dist.all_reduce(sum_Q)
+    if dist.is_available() and dist.is_initialized():
+        dist.all_reduce(sum_Q)
     Q /= sum_Q
 
     for it in range(args.sinkhorn_iterations):
         # normalize each row: total weight per prototype must be 1/K
         sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
-        # dist.all_reduce(sum_of_rows)
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(sum_of_rows)
         Q /= sum_of_rows
         Q /= K
 
