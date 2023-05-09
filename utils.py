@@ -26,34 +26,74 @@ import pickle
 from pathlib import Path
 
 
+@torch.no_grad()
 def visualize_memory_embeddings(memory: torch.Tensor, labels: torch.Tensor,
                                 num_clusters: int, save_path: str,
                                 epoch: int, origin: str):
+    # ----------------- 3D tSNE------------------------------
     tsne = TSNE(n_components=3, verbose=1)
     tsne_proj = tsne.fit_transform(memory)
 
     cmap = cm.get_cmap('gist_rainbow')
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
+
+    # only plot the first 25 clusters
+    num_clusters = 25
     ax.set_prop_cycle(color=[cmap(1.*i/num_clusters)
                       for i in range(num_clusters)])
 
     for lab in range(num_clusters):
         indices = labels == lab
-        ax.scatter(tsne_proj[indices, 0],
-                   tsne_proj[indices, 1],
-                   tsne_proj[indices, 2],
-                   label=lab,
-                   alpha=0.5)
+        indices = np.random.permutation(indices)
+        # only plot 5 samples/class
+        if len(indices < 5):
+            ax.scatter(tsne_proj[indices, 0],
+                       tsne_proj[indices, 1],
+                       tsne_proj[indices, 2],
+                       label=lab,
+                       alpha=0.5)
+        else:
+            ax.scatter(tsne_proj[indices[0:5], 0],
+                       tsne_proj[indices[0:5], 1],
+                       tsne_proj[indices[0:5], 2],
+                       label=lab,
+                       alpha=0.5)
     # plt.show()
-
     save_path = Path(save_path) / Path(origin)
     save_path.mkdir(parents=True, exist_ok=True)
-
-    plt.savefig(save_path / Path("E_"+str(epoch)+".png"))
+    # save 3d interactive graph
     pickle.dump(fig, open(save_path / Path("E_"+str(epoch)+".pickle"), 'wb'))
-    # figx = pickle.load(open('FigureObject.fig.pickle', 'rb'))
-    # figx.show() # Show the figure, edit it, etc.!
+
+   # ----------------- 2D tSNE------------------------------
+    tsne = TSNE(n_components=2, verbose=1)
+    tsne_proj = tsne.fit_transform(memory)
+
+    cmap = cm.get_cmap('gist_rainbow')
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+
+    # only plot the first 25 clusters
+    num_clusters = 25
+    ax.set_prop_cycle(color=[cmap(1.*i/num_clusters)
+                      for i in range(num_clusters)])
+
+    for lab in range(num_clusters):
+        indices = labels == lab
+        indices = np.random.permutation(indices)
+        # only plot 5 samples/class
+        if len(indices < 5):
+            ax.scatter(tsne_proj[indices, 0],
+                       tsne_proj[indices, 1],
+                       label=lab,
+                       alpha=0.5)
+        else:
+            ax.scatter(tsne_proj[indices[0:5], 0],
+                       tsne_proj[indices[0:5], 1],
+                       label=lab,
+                       alpha=0.5)
+    # save 2d graph
+    plt.savefig(save_path / Path("E_"+str(epoch)+".png"))
 
 
 def init_distributed_mode(args):
@@ -495,8 +535,8 @@ def load_model(model, optimizer, fp16_scaler, ckpt_path):
 
 
 def load_student_teacher(student, teacher, ckpt_path, teacher_memory=None,
-                          student_memory=None, student_proj_memory=None, 
-                          optimizer=None, fp16_scaler=None):
+                         student_memory=None, student_proj_memory=None,
+                         optimizer=None, fp16_scaler=None):
     print('==> Loading... \n')
     # open checkpoint file
 

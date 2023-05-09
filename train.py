@@ -54,7 +54,7 @@ def args_parser():
     parser.add_argument('--w_ori', type=float,
                         default=1.0, help='weight of original features (in case of refinement)')
     parser.add_argument("--seed", type=int, default=31, help="seed")
-    parser.add_argument('--uniformity_config', type=str, default='ST',
+    parser.add_argument('--uniformity_config', type=str, default='SS',
                         choices=['ST', 'SS', 'TT'], help='Choice of unifmormity configurations')
 
     # clustering
@@ -70,6 +70,12 @@ def args_parser():
                         help="freeze the prototypes during this many iterations from the start")
     parser.add_argument("--epsilon", default=0.05, type=float,
                         help="regularization parameter for Sinkhorn-Knopp algorithm")
+    parser.add_argument("--visual_freq", default=50, type=int,
+                        help="cluster center visualization frequency")
+    parser.add_argument("--memory_scale", default=20, type=int,
+                        help="memory size compared to number of clusters, i.e.: memory_size = memory_scale * num_clusters")
+    parser.add_argument('--use_cluster_select', default=True, type=bool_flag,
+                        help="Whether to use online clustering")
 
     # memory
     parser.add_argument('--topk', default=5, type=int,
@@ -89,7 +95,7 @@ def args_parser():
     parser.add_argument('--cluster_freq', type=int,
                         default=20, help='memory clustering frequency')
     parser.add_argument('--num_clusters', type=int,
-                        default=200, help='number of memory clusters')
+                        default=100, help='number of memory clusters')
     parser.add_argument('--cluster_algo', type=str, default='kmeans',
                         choices=['kmeans', 'hdbscan'], help='Choice of clustering algorithm')
     parser.add_argument('--sim_threshold', type=float,
@@ -250,8 +256,9 @@ def train_msiam(args):
 
     # ============ preparing memory queue ... ============
     # 2 ** 16
-    memory_size = (10*args.num_clusters //
-                   args.batch_size + 1) * args.batch_size + 1
+    memory_size = (args.memory_scale * args.num_clusters //
+                   (args.batch_size * 2) + 1) * args.batch_size * 2 + 1
+    print("Memory Size: {} \n".format(memory_size))
     teacher_nn_replacer = NNmemoryBankModule2(
         size=memory_size, origin="teacher")
     student_nn_replacer = NNmemoryBankModule2(
@@ -264,11 +271,11 @@ def train_msiam(args):
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "2_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}-{}_W{}_{}_{}_{}".format(
+    local_runs = os.path.join("runs", "4_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}_W{}_{}_{}_{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
         args.topk, args.use_memory_in_loss, args.use_feature_align,
-        args.use_feature_align_teacher, args.cluster_algo, args.num_clusters, args.cluster_freq, args.sim_threshold,
+        args.use_feature_align_teacher, args.use_cluster_select, args.num_clusters, args.memory_scale,
         args.lamb_neg, args.uniformity_config, suffix, args.seed))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
