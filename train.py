@@ -62,7 +62,7 @@ def args_parser():
                         help="Whether to use online clustering")
     parser.add_argument('--w_clustering', type=float,
                         default=0.2, help='weight of clustering loss')
-    parser.add_argument("--sinkhorn_iterations", default=3, type=int,
+    parser.add_argument("--sinkhorn_iterations", default=10, type=int,
                         help="number of iterations in Sinkhorn-Knopp algorithm")
     parser.add_argument("--nmb_prototypes", default=3000, type=int,
                         help="number of prototypes")
@@ -70,7 +70,7 @@ def args_parser():
                         help="freeze the prototypes during this many iterations from the start")
     parser.add_argument("--epsilon", default=0.05, type=float,
                         help="regularization parameter for Sinkhorn-Knopp algorithm")
-    parser.add_argument("--visual_freq", default=50, type=int,
+    parser.add_argument("--visual_freq", default=30, type=int,
                         help="cluster center visualization frequency")
     parser.add_argument("--memory_scale", default=20, type=int,
                         help="memory size compared to number of clusters, i.e.: memory_size = memory_scale * num_clusters")

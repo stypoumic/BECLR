@@ -255,8 +255,10 @@ def evaluate_msiam(args):
         else:
             model = teacher
 
+        feature_extractor = model.module.feature_extractor if "feature_extractor" in model.named_buffers() else None
+
         evaluate_fewshot(model.module.encoder, model.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
-            1, 5], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=model.module.feature_extractor)
+            1, 5], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
 
         if "deit" in args.backbone:
             student.module.encoder.masked_im_modeling = True
