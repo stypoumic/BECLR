@@ -91,6 +91,10 @@ def args_parser():
     parser.add_argument('--pos_threshold', default=0.8, type=float,
                         help="""When the cosine similarity of 2 embeddings is above this threshold, 
                         they are treated as positives, and masked out from the uniformity loss""")
+    parser.add_argument('--memory_momentum', default=1.0, type=float,
+                        help="""the momentum value for updating the OT cluster means in the memory""")
+    parser.add_argument('--memory_dist_metric', type=str, default='cosine',
+                        choices=['cosine', 'euclidean'], help='Choice of distance metric for the OT cost matrix in the memory')
 
     parser.add_argument('--cluster_freq', type=int,
                         default=20, help='memory clustering frequency')
@@ -271,11 +275,12 @@ def train_msiam(args):
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "4_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}_W{}_{}_{}_{}".format(
+    local_runs = os.path.join("runs", "5_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}-{}-{}_W{}_{}_{}_{}".format(
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
         args.topk, args.use_memory_in_loss, args.use_feature_align,
-        args.use_feature_align_teacher, args.use_cluster_select, args.num_clusters, args.memory_scale,
+        args.use_feature_align_teacher, args.use_cluster_select, args.num_clusters,
+        args.memory_scale, args.memory_dist_metric, args.memory_momentum,
         args.lamb_neg, args.uniformity_config, suffix, args.seed))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
