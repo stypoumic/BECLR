@@ -11,9 +11,9 @@ class tieredImageNet(Dataset):
         self.partition = partition
         self.transform = transform
 
-        file_path = os.path.join(split_path, 'tieredImageNet','{}.csv'.format(self.partition))
-        self.imgs, self.labels = self._read_csv(file_path)     
-        print(len(self.labels))
+        file_path = os.path.join(
+            split_path, 'tieredImageNet', '{}.csv'.format(self.partition))
+        self.imgs, self.labels = self._read_csv(file_path)
 
     def _read_csv(self, file_path):
         imgs = []
@@ -22,7 +22,7 @@ class tieredImageNet(Dataset):
         with open(file_path, 'r') as f:
             reader = csv.reader(f)
             for i, row in enumerate(reader):
-                if i==0:
+                if i == 0:
                     continue
                 img, label = row[0], row[1]
                 img = os.path.join(self.data_root, '{}'.format(img))
@@ -42,4 +42,3 @@ class tieredImageNet(Dataset):
 
     def __len__(self):
         return len(self.labels)
-
