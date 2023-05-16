@@ -223,7 +223,10 @@ def train_msiam(args):
 
     transform = DataAugmentationMSiam(args)
 
-    data_path = Path(args.data_path) / Path("miniimagenet_train")
+    if args.dataset == "miniImageNet":
+        data_path = Path(args.data_path) / Path("miniimagenet_train")
+    elif args.dataset == "tieredImageNet":
+        data_path = Path(args.data_path) / Path("tieredimagenet_train")
 
     pred_size = args.patch_size
     dataset = ImageFolderMask(
@@ -275,7 +278,8 @@ def train_msiam(args):
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "5_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}-{}-{}_W{}_{}_{}_{}".format(
+    local_runs = os.path.join("runs", "6_{}_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}-{}-{}_W{}_{}_{}_{}".format(
+        args.dataset,
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
         args.topk, args.use_memory_in_loss, args.use_feature_align,

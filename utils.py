@@ -52,13 +52,13 @@ def visualize_memory_embeddings(memory: torch.Tensor, labels: torch.Tensor,
                        tsne_proj[indices, 1],
                        tsne_proj[indices, 2],
                        label=lab,
-                       alpha=0.5)
+                       alpha=0.75)
         else:
             ax.scatter(tsne_proj[indices[0:5], 0],
                        tsne_proj[indices[0:5], 1],
                        tsne_proj[indices[0:5], 2],
                        label=lab,
-                       alpha=0.5)
+                       alpha=0.75)
     # plt.show()
     save_path = Path(save_path) / Path(origin)
     save_path.mkdir(parents=True, exist_ok=True)
@@ -86,12 +86,12 @@ def visualize_memory_embeddings(memory: torch.Tensor, labels: torch.Tensor,
             ax.scatter(tsne_proj[indices, 0],
                        tsne_proj[indices, 1],
                        label=lab,
-                       alpha=0.5)
+                       alpha=0.75)
         else:
             ax.scatter(tsne_proj[indices[0:5], 0],
                        tsne_proj[indices[0:5], 1],
                        label=lab,
-                       alpha=0.5)
+                       alpha=0.75)
     # save 2d graph
     plt.savefig(save_path / Path("E_"+str(epoch)+".png"))
 
@@ -346,7 +346,7 @@ def build_fewshot_loader(args, mode='test'):
             transform=test_transform)
     elif args.dataset == 'tieredImageNet':
         test_dataset = tieredImageNet(
-            data_path=args.data_path,
+            data_path=Path(args.data_path) / Path("imagenet") / Path("train"),
             split_path=args.split_path,
             partition=mode,
             transform=test_transform)
