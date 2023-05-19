@@ -106,23 +106,44 @@ def init_distributed_mode(args):
     elif 'SLURM_PROCID' in os.environ:
         args.rank = int(os.environ['SLURM_PROCID'])
         args.gpu = args.rank % torch.cuda.device_count()
-    # launched naively with `python main_dino.py`
+        # args.world_size = int(os.environ["SLURM_NNODES"]) * int(
+        #     os.environ["SLURM_TASKS_PER_NODE"][0]
+        # )
     # we manually add MASTER_ADDR and MASTER_PORT to env variables
     elif torch.cuda.is_available():
         print('Will run the code on one GPU.')
         args.rank, args.gpu, args.world_size = 0, 0, 1
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '29500'
+        # use gloo backend for local runs on windows
+        dist.init_process_group(
+            backend="gloo",
+            world_size=args.world_size,
+            rank=args.rank,
+        )
+        torch.cuda.set_device(args.gpu)
+        print('| distributed init (rank {}): {}'.format(
+            args.rank, args.dist_url), flush=True)
+        dist.barrier()
+        return
     else:
         print('Does not support training without GPU.')
         sys.exit(1)
-    # nccl
+
+    print(args.rank)
+
     dist.init_process_group(
-        backend="gloo",
+        backend="nccl",
+        init_method=args.dist_url,
         world_size=args.world_size,
         rank=args.rank,
     )
+
+    torch.cuda.set_device(args.gpu)
+    print('| distributed init (rank {}): {}'.format(
+        args.rank, args.dist_url), flush=True)
     dist.barrier()
+    return
 
 
 class AverageMeter(object):
@@ -192,7 +213,9 @@ def load_distil_model(args):
     args.dist = True
 
     model = model.cuda()
-    model = torch.nn.DataParallel(model)
+    model = nn.parallel.DistributedDataParallel(model,
+                                                device_ids=[args.gpu])
+    # model = torch.nn.DataParallel(model)
 
     msg = model.load_state_dict(checkpoint['student'])
     print(f'load teacher model from: {args.teacher_path}, {msg}')
@@ -231,18 +254,13 @@ def build_student_teacher(args):
 
     # move networks to gpu
     student, teacher = student.cuda(), teacher.cuda()
-    # synchronize batch norms (if any)
-    # if has_batchnorms(student) and use_transformers:
-    #     student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
-    #     teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
 
-    # # we need DDP wrapper to have synchro batch norms working...
-    # if use_transformers:
-    #     student = nn.parallel.DistributedDataParallel(student)
-    #     teacher = nn.parallel.DistributedDataParallel(teacher)
-    # else:
-    teacher = torch.nn.DataParallel(teacher)
-    student = torch.nn.DataParallel(student)
+    teacher = nn.parallel.DistributedDataParallel(teacher,
+                                                  device_ids=[args.gpu])
+    student = nn.parallel.DistributedDataParallel(student,
+                                                  device_ids=[args.gpu])
+    # teacher = torch.nn.DataParallel(teacher)
+    # student = torch.nn.DataParallel(student)
 
     # teacher and student start with the same weights
     teacher.module.load_state_dict(
@@ -254,71 +272,6 @@ def build_student_teacher(args):
 
     print(student)
     return student, teacher
-
-
-def build_model(args):
-    model_dict = {'resnet10': resnet10, 'resnet18': resnet18,
-                  'resnet34': resnet34, 'resnet50': resnet50,
-                  'deit_tiny': vit_tiny}
-
-    use_transformers = True if 'deit' in args.backbone else False
-
-    # -----------------------------------------------------------------
-    # encoder = model_dict[args.backbone]()
-    # model = UniSiam(encoder=encoder, lamb=args.lamb, temp=args.temp,
-    #                 dim_hidden=args.out_dim, use_transformers=use_transformers)
-    # model.encoder = torch.nn.DataParallel(model.encoder)
-    # model = model.cuda()
-
-    # -----------------------------------------------------------------
-
-    # if use_transformers:
-    #     student = model_dict[args.backbone](
-    #         patch_size=args.patch_size,
-    #         drop_path_rate=args.drop_path,
-    #         return_all_tokens=True,
-    #         masked_im_modeling=args.use_masked_im_modeling,
-    #     )
-    #     teacher = model_dict[args.backbone](
-    #         patch_size=args.patch_size,
-    #         return_all_tokens=True,
-    #     )
-    #     embed_dim = student.embed_dim
-    # else:
-    #     student = model_dict[args.backbone]()
-    #     teacher = copy.deepcopy(student)
-    #     embed_dim = student.out_dim
-
-    # # synchronize batch norms (if any)
-    # if has_batchnorms(student):
-    #     student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
-    #     teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
-
-    # # we need DDP wrapper to have synchro batch norms working...
-    # teacher = nn.parallel.DistributedDataParallel(teacher)
-    # student = nn.parallel.DistributedDataParallel(student)
-
-    # # teacher and student start with the same weights
-    # teacher.module.load_state_dict(
-    #     student.module.state_dict(), strict=False)
-
-    # print("AAA:{}".format(str(teacher.module.state_dict())
-    #       == str(student.module.state_dict())))
-
-    # # there is no backpropagation through the teacher, so no need for gradients
-    # for p in teacher.parameters():
-    #     p.requires_grad = False
-
-    # model = MSiam(student=student, teacher=teacher, dim_in=embed_dim, args=args,
-    #               lamb=args.lamb, temp=args.temp, use_transformers=use_transformers)
-
-    # # model.student = torch.nn.DataParallel(model.student)
-    # # model.teacher = torch.nn.DataParallel(model.teacher)
-
-    model = model.cuda()
-    print(model)
-
-    return model
 
 
 def build_fewshot_loader(args, mode='test'):
@@ -541,6 +494,9 @@ def load_student_teacher(student, teacher, ckpt_path, teacher_memory=None,
     # open checkpoint file
 
     checkpoint = torch.load(ckpt_path)
+    # checkpoint = torch.load(
+    #     ckpt_path, map_location="cuda:" + str(torch.distributed.get_rank() % torch.cuda.device_count())
+    # )
 
     epoch = checkpoint['epoch']
     loss = checkpoint['loss']

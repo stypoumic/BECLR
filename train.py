@@ -3,10 +3,11 @@ from torch.utils.tensorboard import SummaryWriter
 from models.msiam import MSiamLoss, swav_loss
 from utils import get_params_groups, get_world_size, clip_gradients, \
     cancel_gradients_last_layer, build_fewshot_loader, load_distil_model, build_student_teacher
-from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher, fix_random_seeds
+from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher, fix_random_seeds, init_distributed_mode
 from memory import NNmemoryBankModule, NNmemoryBankModule2
 from transform.build_transform import DataAugmentationMSiam
-from evaluate import evaluate_fewshot
+# from evaluate import evaluate_fewshot
+from evaluate_ot import evaluate_fewshot
 from dataset.mask_loader import ImageFolderMask
 import numpy as np
 import math
@@ -74,7 +75,7 @@ def args_parser():
                         help="cluster center visualization frequency")
     parser.add_argument("--memory_scale", default=20, type=int,
                         help="memory size compared to number of clusters, i.e.: memory_size = memory_scale * num_clusters")
-    parser.add_argument('--use_cluster_select', default=True, type=bool_flag,
+    parser.add_argument('--use_cluster_select', default=False, type=bool_flag,
                         help="Whether to use online clustering")
 
     # memory
@@ -91,17 +92,18 @@ def args_parser():
     parser.add_argument('--pos_threshold', default=0.8, type=float,
                         help="""When the cosine similarity of 2 embeddings is above this threshold, 
                         they are treated as positives, and masked out from the uniformity loss""")
-    parser.add_argument('--memory_momentum', default=1.0, type=float,
+    parser.add_argument('--memory_momentum', default=0.0, type=float,
                         help="""the momentum value for updating the OT cluster means in the memory""")
-    parser.add_argument('--memory_dist_metric', type=str, default='cosine',
+    parser.add_argument('--memory_dist_metric', type=str, default='euclidean',
                         choices=['cosine', 'euclidean'], help='Choice of distance metric for the OT cost matrix in the memory')
 
     parser.add_argument('--cluster_freq', type=int,
-                        default=20, help='memory clustering frequency')
+                        default=60, help='memory reclustering frequency')
     parser.add_argument('--num_clusters', type=int,
                         default=100, help='number of memory clusters')
     parser.add_argument('--cluster_algo', type=str, default='kmeans',
                         choices=['kmeans', 'hdbscan'], help='Choice of clustering algorithm')
+    parser.add_argument('--recluster', default=False, type=bool_flag, help="""Wether to occasionally recluster the memory embeddings all together""")
     parser.add_argument('--sim_threshold', type=float,
                         default=0.6, help='similarity threshold')
 
@@ -208,6 +210,17 @@ def args_parser():
     parser.add_argument('--eval_freq', type=int,
                         default=50, help='evaluation frequency')
 
+    ###############################################################
+    parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
+        distributed training; see https://pytorch.org/docs/stable/distributed.html""")
+    parser.add_argument("--world_size", default=-1, type=int, help="""
+                        number of processes: it is set automatically and
+                        should not be passed as argument""")
+    parser.add_argument("--rank", default=0, type=int, help="""rank of this process:
+                        it is set automatically and should not be passed as argument""")
+    # parser.add_argument("--local_rank", default=0, type=int,
+    #                     help="this argument is not used and should be ignored")
+
     return parser
 
 
@@ -251,7 +264,6 @@ def train_msiam(args):
     print(f"Data loaded: there are {len(dataset)} images.")
 
     # ============ building model ... ============
-    # model = build_model(args)
     student, teacher = build_student_teacher(args)
 
     distil_model = load_distil_model(args) if args.dist else None
@@ -278,7 +290,7 @@ def train_msiam(args):
         suffix = "NNCLR"
     elif args.enhance_batch:
         suffix = "BI"
-    local_runs = os.path.join("runs", "6_{}_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}-{}-{}_W{}_{}_{}_{}".format(
+    local_runs = os.path.join("runs", "7_{}_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}-{}-{}_W{}_{}_{}_{}".format(
         args.dataset,
         args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
@@ -618,7 +630,7 @@ if __name__ == '__main__':
     args.split_path = (Path(__file__).parent).joinpath('split')
     args.dist = args.teacher_path is not None
     ##
-    # init_distributed_mode(args)
+    init_distributed_mode(args)
     fix_random_seeds(args.seed)
 
     Path(args.save_path).mkdir(parents=True, exist_ok=True)
