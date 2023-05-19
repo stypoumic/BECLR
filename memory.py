@@ -344,7 +344,7 @@ class NNmemoryBankModule2(MemoryBankModule):
             centers_next[i, :] = centers[i, :]
 
         # EMA update of cluster centers
-        self.centers = centers_next * momentum + (1 - momentum) * centers
+        self.centers = centers_next * (1 - momentum) + momentum * centers
 
         return z, bank.T
 
@@ -368,6 +368,7 @@ class NNmemoryBankModule2(MemoryBankModule):
                 # cluster memory embeddings for the first time
                 self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
                 # self.random_memory_split(args)
+                self.last_cluster_epoch = epoch
                 self.start_clustering = True
                 print(self.labels.unique(return_counts=True)[-1].size())
                 print("--Unique Labels Counts--: {}-------\n".format(self.labels.unique(return_counts=True)[-1]))
@@ -387,6 +388,11 @@ class NNmemoryBankModule2(MemoryBankModule):
                     output, labels, update)
                 use_clustering = False
         else:
+            if args.recluster and epoch % args.cluster_freq == 0 and epoch != self.last_cluster_epoch:
+                # restart the memory clusters
+                self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
+                self.last_cluster_epoch = epoch
+
             if epoch % args.visual_freq == 0 and epoch != self.last_cluster_epoch:
                 self.last_cluster_epoch = epoch
                 print(self.labels.unique(return_counts=True)[-1].size())
@@ -685,80 +691,80 @@ class NNmemoryBankModule2(MemoryBankModule):
     #     else:
     #         return output
         
-    # def forward(self,
-    #             output: torch.Tensor,
-    #             epoch: int,
-    #             args,
-    #             k: int = 5,
-    #             labels: torch.Tensor = None,
-    #             update: bool = False):
+    # # def forward(self,
+    # #             output: torch.Tensor,
+    # #             epoch: int,
+    # #             args,
+    # #             k: int = 5,
+    # #             labels: torch.Tensor = None,
+    # #             update: bool = False):
         
-    #     ptr = int(self.bank_ptr) if self.bank.nelement() != 0 else 0
+    # #     ptr = int(self.bank_ptr) if self.bank.nelement() != 0 else 0
 
-    #     # split embeddings of the 2 views
-    #     bsz = output.shape[0] // 2
-    #     z1, z2 = torch.split(
-    #         output, [bsz, bsz], dim=0)
+    # #     # split embeddings of the 2 views
+    # #     bsz = output.shape[0] // 2
+    # #     z1, z2 = torch.split(
+    # #         output, [bsz, bsz], dim=0)
         
-    #     # if memory is full
-    #     if ptr + bsz >= self.size:
-    #         # cluster memory embeddings for the first time
-    #         if self.start_clustering == False:
-    #             self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
-    #             self.start_clustering = True
+    # #     # if memory is full
+    # #     if ptr + bsz >= self.size:
+    # #         # cluster memory embeddings for the first time
+    # #         if self.start_clustering == False:
+    # #             self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
+    # #             self.start_clustering = True
             
-    #         # cluster memory embeddings every args.cluster_freq epochs
-    #         elif epoch % args.cluster_freq == 0 and epoch != self.last_cluster_epoch:
-    #             self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
-    #             self.last_cluster_epoch = epoch
+    # #         # cluster memory embeddings every args.cluster_freq epochs
+    # #         elif epoch % args.cluster_freq == 0 and epoch != self.last_cluster_epoch:
+    # #             self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
+    # #             self.last_cluster_epoch = epoch
 
-    #         bank = self.bank.clone().cuda().detach()
-    #         # Add latest batch to the memory queue based on their most similar memory cluster centers
-    #         self.add_memory_embdeddings(z1, bank, sim_threshold=args.sim_threshold)
+    # #         bank = self.bank.clone().cuda().detach()
+    # #         # Add latest batch to the memory queue based on their most similar memory cluster centers
+    # #         self.add_memory_embdeddings(z1, bank, sim_threshold=args.sim_threshold)
            
-    #     else:
-    #         # Add latest batch to the memory queue (update memory only from 1st view)
-    #         z1, bank = super(NNmemoryBankModule2, self).forward(
-    #             z1, labels, update)
+    # #     else:
+    # #         # Add latest batch to the memory queue (update memory only from 1st view)
+    # #         z1, bank = super(NNmemoryBankModule2, self).forward(
+    # #             z1, labels, update)
             
-    #     bank = bank.to(output.device).t()
-    #     output = torch.cat((z1, z2), 0)
+    # #     bank = bank.to(output.device).t()
+    # #     output = torch.cat((z1, z2), 0)
 
-    #     # only return the kNN features in case the memory start
-    #     # epoch has passed
-    #     if epoch >= args.memory_start_epoch:
-    #         # Normalize batch & memory embeddings
-    #         output_normed = torch.nn.functional.normalize(output, dim=1)
-    #         bank_normed = torch.nn.functional.normalize(bank, dim=1)
+    # #     # only return the kNN features in case the memory start
+    # #     # epoch has passed
+    # #     if epoch >= args.memory_start_epoch:
+    # #         # Normalize batch & memory embeddings
+    # #         output_normed = torch.nn.functional.normalize(output, dim=1)
+    # #         bank_normed = torch.nn.functional.normalize(bank, dim=1)
 
-    #         # split embeddings of the 2 views
-    #         z1, z2 = torch.split(
-    #             output_normed, [args.batch_size, args.batch_size], dim=0)
+    # #         # split embeddings of the 2 views
+    # #         z1, z2 = torch.split(
+    # #             output_normed, [args.batch_size, args.batch_size], dim=0)
             
-    #         # create similarity matrix between batch & memory embeddings
-    #         similarity_matrix1 = torch.einsum(
-    #             "nd,md->nm", z1, bank_normed)
-    #         similarity_matrix2 = torch.einsum(
-    #             "nd,md->nm", z2, bank_normed)
+    # #         # create similarity matrix between batch & memory embeddings
+    # #         similarity_matrix1 = torch.einsum(
+    # #             "nd,md->nm", z1, bank_normed)
+    # #         similarity_matrix2 = torch.einsum(
+    # #             "nd,md->nm", z2, bank_normed)
 
-    #         # find indices of topk NN for each view
-    #         _, topk_indices_1 = torch.topk(similarity_matrix1, k, dim=1)
-    #         _, topk_indices_2 = torch.topk(similarity_matrix2, k, dim=1)
+    # #         # find indices of topk NN for each view
+    # #         _, topk_indices_1 = torch.topk(similarity_matrix1, k, dim=1)
+    # #         _, topk_indices_2 = torch.topk(similarity_matrix2, k, dim=1)
 
-    #         # concat topk NN embeddings for each view
-    #         out1 = torch.index_select(bank, dim=0, index=topk_indices_1[:, 0])
-    #         out2 = torch.index_select(bank, dim=0, index=topk_indices_2[:, 0])
-    #         for i in range(k-1):
-    #             out1 = torch.cat((out1, torch.index_select(
-    #                 bank, dim=0, index=topk_indices_1[:, i])), 0)
-    #             out2 = torch.cat((out2, torch.index_select(
-    #                 bank, dim=0, index=topk_indices_2[:, i])), 0)
+    # #         # concat topk NN embeddings for each view
+    # #         out1 = torch.index_select(bank, dim=0, index=topk_indices_1[:, 0])
+    # #         out2 = torch.index_select(bank, dim=0, index=topk_indices_2[:, 0])
+    # #         for i in range(k-1):
+    # #             out1 = torch.cat((out1, torch.index_select(
+    # #                 bank, dim=0, index=topk_indices_1[:, i])), 0)
+    # #             out2 = torch.cat((out2, torch.index_select(
+    # #                 bank, dim=0, index=topk_indices_2[:, i])), 0)
 
-    #         # concat the embeddings of the 2 views
-    #         output = torch.cat((out1, out2), 0)
-    #         return output
-    #     else:
-    #         return output
+    # #         # concat the embeddings of the 2 views
+    # #         output = torch.cat((out1, out2), 0)
+    # #         return output
+    # #     else:
+    # #         return output
 
 @torch.no_grad()
 def distributed_sinkhorn(out, epsilon, iterations):
