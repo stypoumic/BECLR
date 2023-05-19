@@ -14,7 +14,7 @@ from tqdm import tqdm
 from pathlib import Path
 import torch.backends.cudnn as cudnn
 
-from utils import build_fewshot_loader, bool_flag, build_model, build_student_teacher
+from utils import build_fewshot_loader, bool_flag, build_student_teacher
 
 
 def args_parser():

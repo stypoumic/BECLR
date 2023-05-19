@@ -16,7 +16,7 @@ import torch.backends.cudnn as cudnn
 
 from optimal_transport import OptimalTransport
 
-from utils import build_fewshot_loader, bool_flag, build_model, build_student_teacher
+from utils import build_fewshot_loader, bool_flag, build_student_teacher
 
 
 def args_parser():
@@ -117,10 +117,12 @@ def evaluate_fewshot(
     encoder.eval()
 
     accs = {}
+    accs_ot = {}
     print("==> Evaluating...")
 
     for n_shot in n_shots:
         accs[f'{n_shot}-shot'] = []
+        accs_ot[f'{n_shot}-shot'] = []
 
     for idx, (images, _) in enumerate(tqdm(loader)):
         if idx == 0:
@@ -220,10 +222,10 @@ def evaluate_fewshot(
 
                 # cur_sup_f, cur_qry_f = transportation_module(
                 #     torch.from_numpy(cur_sup_f), torch.from_numpy(cur_qry_f))
-                cur_sup_f, cur_qry_f = transportation_module(
+                prototypes, cur_qry_f = transportation_module(
                     torch.from_numpy(prototypes), torch.from_numpy(cur_qry_f))
 
-                cur_sup_f = cur_sup_f.detach().cpu().numpy()
+                prototypes = prototypes.detach().cpu().numpy()
                 cur_qry_f = cur_qry_f.detach().cpu().numpy()
                 ##################
 
@@ -234,15 +236,27 @@ def evaluate_fewshot(
                                              solver='lbfgs',
                                              max_iter=1000,
                                              multi_class='multinomial')
+                    clf_ot = LogisticRegression(penalty='l2',
+                                                random_state=0,
+                                                C=1.0,
+                                                solver='lbfgs',
+                                                max_iter=1000,
+                                                multi_class='multinomial')
                 elif classifier == 'SVM':
                     clf = LinearSVC(C=1.0)
-                # clf.fit(cur_sup_f, cur_sup_y)
-                clf.fit(cur_sup_f, cur_sup_y[::n_shot])
+                    clf_ot = LinearSVC(C=1.0)
+
+                clf.fit(cur_sup_f, cur_sup_y)
+                clf_ot.fit(prototypes, cur_sup_y[::n_shot])
 
                 cur_qry_pred = clf.predict(cur_qry_f)
+                cur_qry_pred_ot = clf_ot.predict(cur_qry_f)
+
                 acc = metrics.accuracy_score(cur_qry_y, cur_qry_pred)
+                acc_ot = metrics.accuracy_score(cur_qry_y, cur_qry_pred_ot)
 
                 accs[f'{n_shot}-shot'].append(acc)
+                accs_ot[f'{n_shot}-shot'].append(acc_ot)
 
     results = []
     for n_shot in n_shots:
@@ -251,8 +265,17 @@ def evaluate_fewshot(
         mean = acc.mean()
         std = acc.std()
         c95 = 1.96*std/math.sqrt(acc.shape[0])
+
+        acc_ot = np.array(accs_ot[f'{n_shot}-shot'])
+        mean_ot = acc_ot.mean()
+        std_ot = acc_ot.std()
+        c95_ot = 1.96*std_ot/math.sqrt(acc_ot.shape[0])
+
         print('classifier: {}, power_norm: {}, {}-way {}-shot acc: {:.2f}+{:.2f}'.format(
             classifier, power_norm, n_way, n_shot, mean*100, c95*100))
+
+        print('classifier: {}, power_norm: {}, {}-way {}-shot acc: {:.2f}+{:.2f}'.format(
+            classifier, power_norm, n_way, n_shot, mean_ot*100, c95_ot*100))
         results_shot.append(mean*100)
         results_shot.append(c95*100)
         results.append(results_shot)
