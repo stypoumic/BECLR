@@ -23,6 +23,7 @@ import time
 
 import torch
 import torch.nn as nn
+from torch.distributed.elastic.multiprocessing.errors import record
 torch.cuda.empty_cache()
 
 
@@ -41,7 +42,7 @@ def args_parser():
     parser.add_argument('--dataset', type=str, default='miniImageNet',
                         choices=['tieredImageNet', 'miniImageNet'], help='dataset')
     parser.add_argument('--print_freq', type=int,
-                        default=40, help='print frequency')
+                        default=120, help='print frequency')
     parser.add_argument('--num_workers', type=int,
                         default=8, help='num of workers to use')
     parser.add_argument('--ckpt_freq', type=int,
@@ -103,7 +104,8 @@ def args_parser():
                         default=100, help='number of memory clusters')
     parser.add_argument('--cluster_algo', type=str, default='kmeans',
                         choices=['kmeans', 'hdbscan'], help='Choice of clustering algorithm')
-    parser.add_argument('--recluster', default=False, type=bool_flag, help="""Wether to occasionally recluster the memory embeddings all together""")
+    parser.add_argument('--recluster', default=False, type=bool_flag,
+                        help="""Wether to occasionally recluster the memory embeddings all together""")
     parser.add_argument('--sim_threshold', type=float,
                         default=0.6, help='similarity threshold')
 

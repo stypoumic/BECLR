@@ -276,8 +276,9 @@ def evaluate_fewshot(
 
         print('classifier: {}, power_norm: {}, {}-way {}-shot acc: {:.2f}+{:.2f}'.format(
             classifier, power_norm, n_way, n_shot, mean_ot*100, c95_ot*100))
-        results_shot.append(mean*100)
-        results_shot.append(c95*100)
+        print("------------------------------------------------------\n")
+        results_shot.append(mean_ot*100)
+        results_shot.append(c95_ot*100)
         results.append(results_shot)
     return results
 
