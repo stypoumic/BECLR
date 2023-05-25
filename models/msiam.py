@@ -9,6 +9,7 @@ import torch.distributed as dist
 from .head import iBOTHead
 import numpy as np
 from torch.cuda import comm
+from torchmetrics.functional import pairwise_euclidean_distance
 
 
 class CustomSequential(nn.Sequential):
@@ -263,10 +264,10 @@ class MSiam(nn.Module):
                     nn.Linear(dim_out//4, dim_out)
                 )
             # prototype layer
-            self.prototypes = None
-            if args.use_clustering:
-                self.prototypes = nn.Linear(
-                    dim_out, args.nmb_prototypes, bias=False)
+            # self.prototypes = None
+            # if args.use_clustering:
+            #     self.prototypes = nn.Linear(
+            #         dim_out, args.nmb_prototypes, bias=False)
 
     def forward(self, x, masks=None):
 
@@ -312,23 +313,23 @@ class MSiam(nn.Module):
                 else:
                     p_dist = None
 
-                # get prototypes
-                if self.prototypes != None:
-                    prototypes = self.prototypes(p)
-                else:
-                    prototypes = None
+                # # get prototypes
+                # if self.prototypes != None:
+                #     prototypes = self.prototypes(p)
+                # else:
+                #     prototypes = None
 
-                return p, z, f, p_dist, prototypes
+                return p, z, p_dist
             else:
                 z = self.proj(f)
 
-                # get prototypes
-                if self.prototypes != None:
-                    prototypes = self.prototypes(z)
-                else:
-                    prototypes = None
+                # # get prototypes
+                # if self.prototypes != None:
+                #     prototypes = self.prototypes(z)
+                # else:
+                #     prototypes = None
 
-                return z, f, prototypes
+                return z
 
 
 class MSiamLoss(nn.Module):
@@ -491,6 +492,59 @@ class MSiamLoss(nn.Module):
             patch_center * (1 - self.center_momentum2)
 
 
+def ot_assignment_loss(args, p, z, memory):
+
+    def cross_entropy(x1, x2):
+        return -torch.mean(torch.sum(x1 * F.log_softmax(x2, dim=1), dim=1))
+        # return -torch.mean(torch.sum(x1 * torch.log(x2), dim=1))
+
+    # get cluster prototypes
+    centers = memory.centers.clone().cuda()
+
+    # Normalize
+    z = torch.nn.functional.normalize(z, dim=1)
+    p = torch.nn.functional.normalize(p, dim=1)
+    centers = torch.nn.functional.normalize(centers, dim=1)
+
+    # split embeddings into 2 views
+    bsz = z.shape[0] // 2
+    z1, z2 = torch.split(z, [bsz, bsz], dim=0)
+    p1, p2 = torch.split(p, [bsz, bsz], dim=0)
+
+    # create cost matrix between student/teacher embeddings & cluster centers
+    za_1 = pairwise_euclidean_distance(z1, centers)
+    za_2 = pairwise_euclidean_distance(z2, centers)
+    pa_1 = pairwise_euclidean_distance(p1, centers)
+    pa_2 = pairwise_euclidean_distance(p2, centers)
+
+    # apply optimal transport to get assignments (# BS x K)
+    #  #[:args.batch_size] to only get assignments for initial batch
+    if args.cls_use_enhanced_batch:
+        za_1 = distributed_sinkhorn(
+            za_1, args.epsilon, args.sinkhorn_iterations)
+        za_2 = distributed_sinkhorn(
+            za_2, args.epsilon, args.sinkhorn_iterations)
+        pa_1 = distributed_sinkhorn(
+            pa_1, args.epsilon, args.sinkhorn_iterations)
+        pa_2 = distributed_sinkhorn(
+            pa_2, args.epsilon, args.sinkhorn_iterations)
+    else:
+        za_1 = distributed_sinkhorn(za_1, args.epsilon, args.sinkhorn_iterations)[
+            :args.batch_size]
+        za_2 = distributed_sinkhorn(za_2, args.epsilon, args.sinkhorn_iterations)[
+            :args.batch_size]
+        pa_1 = distributed_sinkhorn(pa_1, args.epsilon, args.sinkhorn_iterations)[
+            :args.batch_size]
+        pa_2 = distributed_sinkhorn(pa_2, args.epsilon, args.sinkhorn_iterations)[
+            :args.batch_size]
+
+    if args.cls_use_both_views:
+        return (cross_entropy(za_1, pa_1) + cross_entropy(za_1, pa_2) +
+                cross_entropy(za_2, pa_1) + cross_entropy(za_2, pa_2)) / 4
+    else:
+        return (cross_entropy(za_1, pa_2) + cross_entropy(za_2, pa_1)) / 2
+
+
 def swav_loss(args, student_out, teacher_out, student, teacher, s_memory, t_memory):
     # ============ swav loss ... ============
     loss = 0
@@ -534,9 +588,9 @@ def code_predict(args, output, memory, model, x):
 
 
 @torch.no_grad()
-def distributed_sinkhorn(out, args):
+def distributed_sinkhorn(out, epsilon, iterations):
     # Q is K-by-B for consistency with notations from our paper
-    Q = torch.exp(out / args.epsilon).t()
+    Q = torch.exp(out / epsilon).t()
     B = Q.shape[1]   # number of samples to assign
     K = Q.shape[0]  # how many prototypes
 
@@ -546,7 +600,7 @@ def distributed_sinkhorn(out, args):
         dist.all_reduce(sum_Q)
     Q /= sum_Q
 
-    for it in range(args.sinkhorn_iterations):
+    for it in range(iterations):
         # normalize each row: total weight per prototype must be 1/K
         sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
         if dist.is_available() and dist.is_initialized():
@@ -559,4 +613,5 @@ def distributed_sinkhorn(out, args):
         Q /= B
 
     Q *= B  # the colomns must sum to 1 so that Q is an assignment
+    # print(torch.sum(Q, dim=1, keepdim=True))
     return Q.t()
