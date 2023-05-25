@@ -1,6 +1,6 @@
 from __future__ import print_function
 from torch.utils.tensorboard import SummaryWriter
-from models.msiam import MSiamLoss, swav_loss
+from models.msiam import MSiamLoss, swav_loss, ot_assignment_loss
 from utils import get_params_groups, get_world_size, clip_gradients, \
     cancel_gradients_last_layer, build_fewshot_loader, load_distil_model, build_student_teacher
 from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher, fix_random_seeds, init_distributed_mode
@@ -64,6 +64,10 @@ def args_parser():
                         help="Whether to use online clustering")
     parser.add_argument('--w_clustering', type=float,
                         default=0.2, help='weight of clustering loss')
+    parser.add_argument('--cls_use_enhanced_batch', default=True, type=bool_flag,
+                        help="Whether to use the enhanced batch for the clustering loss")
+    parser.add_argument('--cls_use_both_views', default=True, type=bool_flag,
+                        help="Whether to enforce consistency for both views in clustering loss")
     parser.add_argument("--sinkhorn_iterations", default=10, type=int,
                         help="number of iterations in Sinkhorn-Knopp algorithm")
     parser.add_argument("--nmb_prototypes", default=3000, type=int,
@@ -91,7 +95,7 @@ def args_parser():
     parser.add_argument('--use_memory_in_loss', default=False, type=bool_flag,
                         help="Whether to use memory in uniformity loss")
     parser.add_argument('--pos_threshold', default=0.8, type=float,
-                        help="""When the cosine similarity of 2 embeddings is above this threshold, 
+                        help="""When the cosine similarity of 2 embeddings is above this threshold,
                         they are treated as positives, and masked out from the uniformity loss""")
     parser.add_argument('--memory_momentum', default=0.0, type=float,
                         help="""the momentum value for updating the OT cluster means in the memory""")
@@ -114,7 +118,7 @@ def args_parser():
         output for [CLS] token.""")
     parser.add_argument('--patch_out_dim', default=512, type=int, help="""Dimensionality of
         output for patch tokens.""")
-    parser.add_argument('--shared_head', default=False, type=bool_flag, help="""Wether to share 
+    parser.add_argument('--shared_head', default=False, type=bool_flag, help="""Wether to share
         the same head for [CLS] token output and patch tokens output. When set to false, patch_out_dim
         is ignored and enforced to be same with out_dim. (Default: False)""")
     parser.add_argument('--shared_head_teacher', default=True, type=bool_flag, help="""See above.
@@ -163,9 +167,9 @@ def args_parser():
     parser.add_argument('--teacher_temp', default=0.04, type=float, help="""Final value (after linear warmup)
         of the teacher temperature. For most experiments, anything above 0.07 is unstable. We recommend
         starting with the default value of 0.04 and increase this slightly if needed.""")
-    parser.add_argument('--warmup_teacher_patch_temp', default=0.04, type=float, help="""See 
+    parser.add_argument('--warmup_teacher_patch_temp', default=0.04, type=float, help="""See
         `--warmup_teacher_temp`""")
-    parser.add_argument('--teacher_patch_temp', default=0.07, type=float, help=""""See 
+    parser.add_argument('--teacher_patch_temp', default=0.07, type=float, help=""""See
         `--teacher_temp`""")
     parser.add_argument('--warmup_teacher_temp_epochs', default=30, type=int,
                         help='Number of warmup epochs for the teacher temperature (Default: 30).')
@@ -470,17 +474,6 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
         else:
             z_dist = None
 
-        if args.use_clustering:
-            # normalize the prototypes
-            with torch.no_grad():
-                w_student = student.module.prototypes.weight.data.clone()
-                w_student = nn.functional.normalize(w_student, dim=1, p=2)
-                student.module.prototypes.weight.copy_(w_student)
-
-                w_teacher = teacher.module.prototypes.weight.data.clone()
-                w_teacher = nn.functional.normalize(w_teacher, dim=1, p=2)
-                teacher.module.prototypes.weight.copy_(w_teacher)
-
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             if 'deit' in args.backbone:
                 pass
@@ -490,9 +483,9 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                 z_refined = None
 
                 # pass images from student/teacher encoders
-                p, z_student, f_student, p_dist, s_prototypes = student(
+                p, z_student, p_dist = student(
                     masked_images)
-                z_teacher, f_teacher, t_prototypes = teacher(images)
+                z_teacher = teacher(images)
 
                 # replace teacher features with NN if NNCLR is activated
                 if args.use_nnclr:
@@ -527,13 +520,13 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     w_ori=args.w_ori,
                     memory=teacher_nn_replacer.bank.cuda())
 
-                if args.use_clustering and epoch > args.memory_start_epoch:
-                    cluster_loss = swav_loss(args, s_prototypes, t_prototypes, student,
-                                             teacher, student_f_nn_replacer,
-                                             teacher_nn_replacer)
-                    cluster_loss = 0 if math.isnan(
-                        cluster_loss) else cluster_loss
-
+                # if args.use_clustering and epoch > args.memory_start_epoch:
+                if args.use_clustering and teacher_nn_replacer.start_clustering:        # CHANGE BACK
+                    cluster_loss = ot_assignment_loss(
+                        args, p, z_teacher, student_nn_replacer)
+                    if cluster_loss.isnan().any():
+                        print("AAAA")
+                        exit()
                 else:
                     cluster_loss = 0
 

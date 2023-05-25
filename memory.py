@@ -358,7 +358,6 @@ class NNmemoryBankModule2(MemoryBankModule):
 
         ptr = int(self.bank_ptr) if self.bank.nelement() != 0 else 0
 
-        # split embeddings of the 2 views
         bsz = output.shape[0]
         
         if self.start_clustering == False:
