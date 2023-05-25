@@ -25,7 +25,9 @@ class tieredImageNet(Dataset):
                 if i == 0:
                     continue
                 img, label = row[0], row[1]
-                img = os.path.join(self.data_root, '{}'.format(img))
+                img = os.path.join(self.data_root, '{}'.format(
+                    label), '{}'.format(img.split("\\")[1]))
+                # img = os.path.join(self.data_root, '{}'.format(img))
                 imgs.append(img)
                 if label not in labels_name:
                     labels_name.append(label)
