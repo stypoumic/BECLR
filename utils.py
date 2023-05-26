@@ -97,20 +97,36 @@ def visualize_memory_embeddings(memory: torch.Tensor, labels: torch.Tensor,
 
 
 def init_distributed_mode(args):
-    # # launched with torch.distributed.launch
-    # if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-    #     args.rank = int(os.environ["RANK"])
-    #     args.world_size = int(os.environ['WORLD_SIZE'])
-    #     args.gpu = int(os.environ['LOCAL_RANK'])
-    # # launched with submitit on a slurm cluster
-    # elif 'SLURM_PROCID' in os.environ:
-    #     args.rank = int(os.environ['SLURM_PROCID'])
-    #     args.gpu = args.rank % torch.cuda.device_count()
-    #     # args.world_size = int(os.environ["SLURM_NNODES"]) * int(
-    #     #     os.environ["SLURM_TASKS_PER_NODE"][0]
-    #     # )
+    # launched with torch.distributed.launch
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        args.rank = int(os.environ["RANK"])
+        args.world_size = int(os.environ['WORLD_SIZE'])
+        args.gpu = int(os.environ['LOCAL_RANK'])
+
+        ############### TO REMOVE #################
+
+        # # use gloo backend for local runs on windows
+        # dist.init_process_group(
+        #     backend="gloo",
+        #     world_size=args.world_size,
+        #     rank=args.rank,
+        # )
+        # torch.cuda.set_device(args.gpu)
+        # print('| distributed init (rank {}): {}'.format(
+        #     args.rank, args.dist_url), flush=True)
+        # dist.barrier()
+        # return
+        ############### TO REMOVE #################
+
+    # launched with submitit on a slurm cluster
+    elif 'SLURM_PROCID' in os.environ:
+        args.rank = int(os.environ['SLURM_PROCID'])
+        args.gpu = args.rank % torch.cuda.device_count()
+        # args.world_size = int(os.environ["SLURM_NNODES"]) * int(
+        #     os.environ["SLURM_TASKS_PER_NODE"][0]
+        # )
     # we manually add MASTER_ADDR and MASTER_PORT to env variables
-    if torch.cuda.is_available():
+    elif torch.cuda.is_available():
         print('Will run the code on one GPU.')
         args.rank, args.gpu, args.world_size = 0, 0, 1
         os.environ['MASTER_ADDR'] = '127.0.0.1'
@@ -126,24 +142,24 @@ def init_distributed_mode(args):
             args.rank, args.dist_url), flush=True)
         dist.barrier()
         return
-    # else:
-    #     print('Does not support training without GPU.')
-    #     sys.exit(1)
+    else:
+        print('Does not support training without GPU.')
+        sys.exit(1)
 
     # print(args.rank)
 
-    # dist.init_process_group(
-    #     backend="nccl",
-    #     init_method=args.dist_url,
-    #     world_size=args.world_size,
-    #     rank=args.rank,
-    # )
+    dist.init_process_group(
+        backend="nccl",
+        init_method=args.dist_url,
+        world_size=args.world_size,
+        rank=args.rank,
+    )
 
-    # torch.cuda.set_device(args.gpu)
-    # print('| distributed init (rank {}) (gpu {}): {}'.format(
-    #     args.rank, args.gpu, args.dist_url), flush=True)
-    # dist.barrier()
-    dist.init_process_group(backend="nccl")
+    torch.cuda.set_device(args.gpu)
+    print('| distributed init (rank {}) (gpu {}): {}'.format(
+        args.rank, args.gpu, args.dist_url), flush=True)
+    dist.barrier()
+    # dist.init_process_group(backend="nccl")
     return
 
 
@@ -256,17 +272,17 @@ def build_student_teacher(args):
     # move networks to gpu
     student, teacher = student.cuda(), teacher.cuda()
 
-    local_rank = int(os.environ["LOCAL_RANK"])
-    teacher = nn.parallel.DistributedDataParallel(teacher,
-                                                  device_ids=[local_rank],
-                                                  output_device=local_rank)
-    student = nn.parallel.DistributedDataParallel(student,
-                                                  device_ids=[local_rank],
-                                                  output_device=local_rank)
+    # local_rank = int(os.environ["LOCAL_RANK"])
     # teacher = nn.parallel.DistributedDataParallel(teacher,
-    #                                               device_ids=[args.gpu])
+    #                                               device_ids=[local_rank],
+    #                                               output_device=local_rank)
     # student = nn.parallel.DistributedDataParallel(student,
-    #                                               device_ids=[args.gpu])
+    #                                               device_ids=[local_rank],
+    #                                               output_device=local_rank)
+    teacher = nn.parallel.DistributedDataParallel(teacher,
+                                                  device_ids=[args.gpu])
+    student = nn.parallel.DistributedDataParallel(student,
+                                                  device_ids=[args.gpu])
     # teacher = torch.nn.DataParallel(teacher)
     # student = torch.nn.DataParallel(student)
 
