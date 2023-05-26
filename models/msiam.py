@@ -347,25 +347,7 @@ class MSiamLoss(nn.Module):
         self.center_momentum = center_momentum
         self.center_momentum2 = center_momentum2
         self.ngcrops = ngcrops
-
-        self.register_buffer("center", torch.zeros(1, args.out_dim))
-        self.register_buffer("center2", torch.zeros(1, 1, args.patch_out_dim))
         self.lambda1 = lambda1
-
-        # we apply a warm up for the teacher temperature because
-        # a too high temperature makes the training instable at the beginning
-        self.teacher_temp_schedule = np.concatenate((
-            np.linspace(args.warmup_teacher_temp,
-                        args.teacher_temp, args.warmup_teacher_temp_epochs),
-            np.ones(args.epochs - args.warmup_teacher_temp_epochs) *
-            args.teacher_temp
-        ))
-        self.teacher_temp2_schedule = np.concatenate((
-            np.linspace(args.warmup_teacher_patch_temp,
-                        args.teacher_patch_temp, args.warmup_teacher_temp_epochs),
-            np.ones(args.epochs - args.warmup_teacher_temp_epochs) *
-            args.teacher_patch_temp
-        ))
 
     def forward(self, z_teacher, p_student, z_student, args, epoch=None,
                 p_refined=None, z_refined=None, p_dist=None, z_dist=None, w_ori=1.0,
@@ -492,57 +474,69 @@ class MSiamLoss(nn.Module):
             patch_center * (1 - self.center_momentum2)
 
 
-def ot_assignment_loss(args, p, z, memory):
+class ClusterLoss(nn.Module):
+    def __init__(self):
+        super(ClusterLoss, self).__init__()
 
-    def cross_entropy(x1, x2):
-        return -torch.mean(torch.sum(x1 * F.log_softmax(x2, dim=1), dim=1))
+    def cross_entropy(self, x1, x2):
+        # return -torch.mean(torch.sum(x1 * F.log_softmax(x2, dim=1), dim=1))
         # return -torch.mean(torch.sum(x1 * torch.log(x2), dim=1))
+        return -torch.mean(torch.sum(x1 * x2, dim=1))
 
-    # get cluster prototypes
-    centers = memory.centers.clone().cuda()
+    def forward(self, args, p, z, memory):
+        # get cluster prototypes
+        centers = memory.centers.clone().cuda()
 
-    # Normalize
-    z = torch.nn.functional.normalize(z, dim=1)
-    p = torch.nn.functional.normalize(p, dim=1)
-    centers = torch.nn.functional.normalize(centers, dim=1)
+        # Normalize
+        z = torch.nn.functional.normalize(z, dim=1)
+        p = torch.nn.functional.normalize(p, dim=1)
+        centers = torch.nn.functional.normalize(centers, dim=1)
 
-    # split embeddings into 2 views
-    bsz = z.shape[0] // 2
-    z1, z2 = torch.split(z, [bsz, bsz], dim=0)
-    p1, p2 = torch.split(p, [bsz, bsz], dim=0)
+        # split embeddings into 2 views
+        bsz = z.shape[0] // 2
+        z1, z2 = torch.split(z, [bsz, bsz], dim=0)
+        p1, p2 = torch.split(p, [bsz, bsz], dim=0)
 
-    # create cost matrix between student/teacher embeddings & cluster centers
-    za_1 = pairwise_euclidean_distance(z1, centers)
-    za_2 = pairwise_euclidean_distance(z2, centers)
-    pa_1 = pairwise_euclidean_distance(p1, centers)
-    pa_2 = pairwise_euclidean_distance(p2, centers)
+        # create cost matrix between student/teacher embeddings & cluster centers
+        za_1 = pairwise_euclidean_distance(z1, centers)
+        za_2 = pairwise_euclidean_distance(z2, centers)
+        pa_1 = pairwise_euclidean_distance(p1, centers)
+        pa_2 = pairwise_euclidean_distance(p2, centers)
 
-    # apply optimal transport to get assignments (# BS x K)
-    #  #[:args.batch_size] to only get assignments for initial batch
-    if args.cls_use_enhanced_batch:
-        za_1 = distributed_sinkhorn(
-            za_1, args.epsilon, args.sinkhorn_iterations)
-        za_2 = distributed_sinkhorn(
-            za_2, args.epsilon, args.sinkhorn_iterations)
-        pa_1 = distributed_sinkhorn(
-            pa_1, args.epsilon, args.sinkhorn_iterations)
-        pa_2 = distributed_sinkhorn(
-            pa_2, args.epsilon, args.sinkhorn_iterations)
-    else:
-        za_1 = distributed_sinkhorn(za_1, args.epsilon, args.sinkhorn_iterations)[
-            :args.batch_size]
-        za_2 = distributed_sinkhorn(za_2, args.epsilon, args.sinkhorn_iterations)[
-            :args.batch_size]
-        pa_1 = distributed_sinkhorn(pa_1, args.epsilon, args.sinkhorn_iterations)[
-            :args.batch_size]
-        pa_2 = distributed_sinkhorn(pa_2, args.epsilon, args.sinkhorn_iterations)[
-            :args.batch_size]
+        # apply optimal transport to get assignments (# BS x K)
+        #  #[:args.batch_size] to only get assignments for initial batch
+        if args.cls_use_enhanced_batch:
+            za_1 = distributed_sinkhorn(
+                za_1, args.epsilon, args.sinkhorn_iterations).requires_grad_()
+            za_2 = distributed_sinkhorn(
+                za_2, args.epsilon, args.sinkhorn_iterations).requires_grad_()
+            pa_1 = distributed_sinkhorn(
+                pa_1, args.epsilon, args.sinkhorn_iterations).requires_grad_()
+            pa_2 = distributed_sinkhorn(
+                pa_2, args.epsilon, args.sinkhorn_iterations).requires_grad_()
+        else:
+            za_1 = distributed_sinkhorn(za_1, args.epsilon, args.sinkhorn_iterations)[
+                :args.batch_size].requires_grad_()
+            za_2 = distributed_sinkhorn(za_2, args.epsilon, args.sinkhorn_iterations)[
+                :args.batch_size].requires_grad_()
+            pa_1 = distributed_sinkhorn(pa_1, args.epsilon, args.sinkhorn_iterations)[
+                :args.batch_size].requires_grad_()
+            pa_2 = distributed_sinkhorn(pa_2, args.epsilon, args.sinkhorn_iterations)[
+                :args.batch_size].requires_grad_()
 
-    if args.cls_use_both_views:
-        return (cross_entropy(za_1, pa_1) + cross_entropy(za_1, pa_2) +
-                cross_entropy(za_2, pa_1) + cross_entropy(za_2, pa_2)) / 4
-    else:
-        return (cross_entropy(za_1, pa_2) + cross_entropy(za_2, pa_1)) / 2
+        # print(self.cross_entropy(za_1, pa_1))
+        # print(self.cross_entropy(za_1, za_1))
+        # mse_loss = nn.MSELoss()
+
+        # print(mse_loss(za_1, pa_1))
+        # print(mse_loss(za_1, za_1))
+        # exit()
+
+        if args.cls_use_both_views:
+            return (self.cross_entropy(za_1, pa_1) + self.cross_entropy(za_1, pa_2) +
+                    self.cross_entropy(za_2, pa_1) + self.cross_entropy(za_2, pa_2)) / 4
+        else:
+            return (self.cross_entropy(za_1, pa_2) + self.cross_entropy(za_2, pa_1)) / 2
 
 
 def swav_loss(args, student_out, teacher_out, student, teacher, s_memory, t_memory):

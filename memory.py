@@ -122,7 +122,7 @@ class NNmemoryBankModule(MemoryBankModule):
             return z
         else:
             return output
-        
+
 
 def clusterer(z, algo='kmeans', n_clusters=5, metric='euclidean', hdb_min_cluster_size=4):
     """
@@ -143,14 +143,13 @@ def clusterer(z, algo='kmeans', n_clusters=5, metric='euclidean', hdb_min_cluste
         # if cuml_details is not None:
         #     clf = hdbscan.HDBSCAN(metric=metric, min_cluster_size=hdb_min_cluster_size)
         # else:
-        clf = hdbscan.HDBSCAN(metric=metric, min_cluster_size=hdb_min_cluster_size, core_dist_n_jobs=4)
+        clf = hdbscan.HDBSCAN(
+            metric=metric, min_cluster_size=hdb_min_cluster_size, core_dist_n_jobs=4)
         clf.fit(z)
         predicted_labels = clf.labels_
         probs = clf.probabilities_
     return clf, predicted_labels, probs
 
-
-    
 
 class NNmemoryBankModule2(MemoryBankModule):
     def __init__(self, size: int = 2 ** 16, origin: str = None):
@@ -158,7 +157,7 @@ class NNmemoryBankModule2(MemoryBankModule):
         # register_buffer => Tensor which is not a parameter, but should be part
         #  of the modules state.
         # Used for tensors that need to be on the same device as the module.
-        # persistent=False tells PyTorch to not add the buffer to the state dict 
+        # persistent=False tells PyTorch to not add the buffer to the state dict
         # (e.g. when we save the model)
         self.register_buffer(
             "centers", tensor=torch.empty(0, dtype=torch.float), persistent=False
@@ -171,22 +170,22 @@ class NNmemoryBankModule2(MemoryBankModule):
         self.topk1 = 1
         self.topk2 = 1
         self.origin = origin
-    
+
     def load_memory_bank(self, bank: torch.Tensor, ptr: torch.long):
         self.bank = bank
         self.bank_ptr = ptr
 
     @torch.no_grad()
-    def cluster_memory_embeddings(self, cluster_algo="kmeans", num_clusters=300, 
-                min_cluster_size = 4, rerank=False ):
+    def cluster_memory_embeddings(self, cluster_algo="kmeans", num_clusters=300,
+                                  min_cluster_size=4, rerank=False):
         bank = self.bank.T.detach()
-        
+
         bank_np = F.normalize(bank.detach()).cpu().numpy()
-        
+
         if cluster_algo == "kmeans":
             clf, labels, _ = clusterer(bank_np,
-                                        n_clusters=num_clusters,
-                                        algo="kmeans")
+                                       n_clusters=num_clusters,
+                                       algo="kmeans")
             # get cluster means & labels
             centers = clf.cluster_centers_
             self.centers = torch.from_numpy(centers).type_as(bank).cpu()
@@ -194,13 +193,13 @@ class NNmemoryBankModule2(MemoryBankModule):
         else:
             # possibly reranking before clustering
             clf, labels, probs = clusterer(
-                        bank_np.astype(float),
-                        algo="hdbscan",
-                        metric="euclidean" if not rerank else "precomputed",
-                        hdb_min_cluster_size=min_cluster_size
-                    )
+                bank_np.astype(float),
+                algo="hdbscan",
+                metric="euclidean" if not rerank else "precomputed",
+                hdb_min_cluster_size=min_cluster_size
+            )
             labels = torch.from_numpy(labels).type_as(bank).long()
-           
+
             if -1 in labels:
                 # breakpoint()
                 non_noise_indices = ~(labels == -1)
@@ -212,16 +211,18 @@ class NNmemoryBankModule2(MemoryBankModule):
                 )
 
             # copies labels across feature dimension  (memory_size x feature_dim)
-            tmp = labels_masked.view(labels_masked.size(0), 1).expand(-1, bank.size(1))
+            tmp = labels_masked.view(
+                labels_masked.size(0), 1).expand(-1, bank.size(1))
 
             # (#UN x 512)
             unique_labels, labels_count = tmp.unique(dim=0, return_counts=True)
 
             # get cluster means
-            centers = torch.zeros_like(unique_labels, dtype=torch.float).scatter_add_(0, tmp.type(torch.int64), bank)
+            centers = torch.zeros_like(unique_labels, dtype=torch.float).scatter_add_(
+                0, tmp.type(torch.int64), bank)
             self.centers = centers / labels_count.float().unsqueeze(1).cpu()
             self.labels = labels.cpu()
-    
+
     @torch.no_grad()
     def random_memory_split(self, args):
         bank = self.bank.T.detach()
@@ -236,14 +237,13 @@ class NNmemoryBankModule2(MemoryBankModule):
             samples = bank[samples_per_cluster*i: samples_per_cluster*(i+1), :]
 
             self.centers[i, :] = torch.mean(samples, 0, True)
-            self.labels[samples_per_cluster*i: samples_per_cluster*(i+1)] = torch.ones(samples_per_cluster) * i
+            self.labels[samples_per_cluster*i: samples_per_cluster *
+                        (i+1)] = torch.ones(samples_per_cluster) * i
 
         # shuffle labels and memory
         random_perm = torch.randperm(self.labels.shape[0])
         self.bank = self.bank[:, random_perm]
         self.labels = self.labels[random_perm]
-
-
 
     # @torch.no_grad()
     # def add_memory_embdeddings(self,
@@ -277,34 +277,35 @@ class NNmemoryBankModule2(MemoryBankModule):
 
     #         # find most similar memory embedding from top3 clusters
     #         sim, top1 = torch.topk(z_memory_similarity_matrix, 1, dim=1)
-    #         # replace most similar memory embedding with batch embedding, if 
+    #         # replace most similar memory embedding with batch embedding, if
     #         # their cos similarity is above the threshold
     #         if sim.squeeze().float() > sim_threshold:
     #             index = indices[top1.squeeze()]
     #             self.bank[:, index] = z[i,:].unsqueeze(0)
 
-    
     @torch.no_grad()
-    def add_memory_embdeddings_OT(self, args, z: torch.Tensor, dist_metric = "cosine", momentum = 0.9):
+    def add_memory_embdeddings_OT(self, args, z: torch.Tensor, dist_metric="cosine", momentum=0.9):
         centers = self.centers.clone().cpu()
 
         if dist_metric == "cosine":
             # Normalize batch & memory embeddings
-            z_normed = torch.nn.functional.normalize(z, dim=1)  #BS x D
-            centers_normed = torch.nn.functional.normalize(centers, dim=1).cuda() #K x D
+            z_normed = torch.nn.functional.normalize(z, dim=1)  # BS x D
+            centers_normed = torch.nn.functional.normalize(
+                centers, dim=1).cuda()  # K x D
 
             # create cost matrix between batch embeddings & cluster centers
-            Q = torch.einsum("nd,md->nm", z_normed, centers_normed)    #BS x K
+            Q = torch.einsum("nd,md->nm", z_normed, centers_normed)  # BS x K
         else:
             # create cost matrix between batch embeddings & cluster centers
             Q = pairwise_euclidean_distance(z, centers.cuda())
 
         # apply optimal transport between batch embeddings and cluster centers
-        Q = distributed_sinkhorn(Q, args.epsilon, args.sinkhorn_iterations) #BS x K
+        Q = distributed_sinkhorn(
+            Q, args.epsilon, args.sinkhorn_iterations)  # BS x K
 
         # get assignments (batch labels)
         batch_labels = torch.argmax(Q, dim=1)
-        
+
         # add equipartitioned batch to memory (FIFO)
         batch_size = z.shape[0]
         ptr = int(self.bank_ptr)
@@ -316,7 +317,7 @@ class NNmemoryBankModule2(MemoryBankModule):
             self.bank[:, ptr: ptr + batch_size] = z.T.detach()
             self.labels[ptr: ptr + batch_size] = batch_labels.detach()
             self.bank_ptr[0] = ptr + batch_size
-        
+
         # Update cluster centers
         labels = self.labels.clone().cpu()
         bank = self.bank.clone().cpu().T.detach()
@@ -329,14 +330,16 @@ class NNmemoryBankModule2(MemoryBankModule):
                 deleted_labels.append(i)
                 label = torch.tensor([[i]]).expand(-1, bank.size(1))
                 unique_labels = torch.cat((unique_labels, label), 0)
-                labels_count = torch.cat((labels_count, torch.tensor([0.001])), 0)
+                labels_count = torch.cat(
+                    (labels_count, torch.tensor([0.001])), 0)
         # _, indices = torch.sort(unique_labels, 0)
         # sort_index = indices[:,0]
         # unique_labels = unique_labels[sort_index, :]
         # labels_count
 
         # get cluster means
-        centers_next = torch.zeros_like(unique_labels, dtype=torch.float).scatter_add_(0, view.type(torch.int64), bank).cpu() #UN x 512
+        centers_next = torch.zeros_like(unique_labels, dtype=torch.float).scatter_add_(
+            0, view.type(torch.int64), bank).cpu()  # UN x 512
         centers_next = centers_next / labels_count.float().unsqueeze(1)
 
         # for clusters with no assignments, use their center from the perviosu iteration
@@ -359,28 +362,25 @@ class NNmemoryBankModule2(MemoryBankModule):
         ptr = int(self.bank_ptr) if self.bank.nelement() != 0 else 0
 
         bsz = output.shape[0]
-        
+
         if self.start_clustering == False:
             # if memory is full for the first time
             if ptr + bsz >= self.size:
-            # if epoch >= args.memory_start_epoch:
+                # if epoch >= args.memory_start_epoch:
                 # cluster memory embeddings for the first time
-                self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
+                self.cluster_memory_embeddings(
+                    cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
                 # self.random_memory_split(args)
                 self.last_cluster_epoch = epoch
                 self.start_clustering = True
                 print(self.labels.unique(return_counts=True)[-1].size())
-                print("--Unique Labels Counts--: {}-------\n".format(self.labels.unique(return_counts=True)[-1]))
-                # Visualize memory embeddings using tSNE
-                if self.origin == "teacher" or self.origin == "student":
-                    visualize_memory_embeddings(np.array(self.bank.T.detach().cpu()),
-                                                np.array(self.labels.detach().cpu()), 
-                                                args.num_clusters, args.save_path, 
-                                                origin=self.origin, epoch=epoch)
+                print("--Unique Labels Counts--: {}-------\n".format(
+                    self.labels.unique(return_counts=True)[-1]))
 
                 # Add latest batch to the memory queue using Optimal Transport
-                output, bank = self.add_memory_embdeddings_OT(args, output, dist_metric=args.memory_dist_metric, momentum=args.memory_momentum)
-                use_clustering = True if args.use_cluster_select else False   
+                output, bank = self.add_memory_embdeddings_OT(
+                    args, output, dist_metric=args.memory_dist_metric, momentum=args.memory_momentum)
+                use_clustering = True if args.use_cluster_select else False
             else:
                 # Add latest batch to the memory queue (update memory only from both view)
                 output, bank = super(NNmemoryBankModule2, self).forward(
@@ -389,26 +389,29 @@ class NNmemoryBankModule2(MemoryBankModule):
         else:
             if args.recluster and epoch % args.cluster_freq == 0 and epoch != self.last_cluster_epoch:
                 # restart the memory clusters
-                self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
+                self.cluster_memory_embeddings(
+                    cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
                 self.last_cluster_epoch = epoch
 
             if epoch % args.visual_freq == 0 and epoch != self.last_cluster_epoch:
                 self.last_cluster_epoch = epoch
                 print(self.labels.unique(return_counts=True)[-1].size())
-                print("--Unique Labels Counts--: {}-------\n".format(self.labels.unique(return_counts=True)[-1]))
+                print("--Unique Labels Counts--: {}-------\n".format(
+                    self.labels.unique(return_counts=True)[-1]))
                 # Visualize memory embeddings using tSNE
                 if self.origin == "teacher" or self.origin == "student":
                     visualize_memory_embeddings(np.array(self.bank.T.detach().cpu()),
-                                                np.array(self.labels.detach().cpu()), 
-                                                args.num_clusters, args.save_path, 
+                                                np.array(
+                                                    self.labels.detach().cpu()),
+                                                args.num_clusters, args.save_path,
                                                 origin=self.origin, epoch=epoch)
-                    
+
             # Add latest batch to the memory queue using Optimal Transport
-            output, bank = self.add_memory_embdeddings_OT(args, output, dist_metric=args.memory_dist_metric, momentum=args.memory_momentum)
-            use_clustering = True if args.use_cluster_select else False 
-            
+            output, bank = self.add_memory_embdeddings_OT(
+                args, output, dist_metric=args.memory_dist_metric, momentum=args.memory_momentum)
+            use_clustering = True if args.use_cluster_select else False
+
         bank = bank.to(output.device).t()
-       
 
         # only concat the nearest neighbor features in case the memory start
         # epoch has passed
@@ -420,13 +423,13 @@ class NNmemoryBankModule2(MemoryBankModule):
             # split embeddings of the 2 views
             z1, z2 = torch.split(
                 output_normed, [args.batch_size, args.batch_size], dim=0)
-            
+
             # create similarity matrix between batch & memory embeddings
             similarity_matrix1 = torch.einsum(
                 "nd,md->nm", z1, bank_normed)
             similarity_matrix2 = torch.einsum(
                 "nd,md->nm", z2, bank_normed)
-            
+
             # if clustering is used for memory upating, use clustering for NN selection as well
             if use_clustering:
                 centers = self.centers.clone().cuda()
@@ -440,7 +443,7 @@ class NNmemoryBankModule2(MemoryBankModule):
                     "nd,md->nm", z1, centers)
                 z_center_similarity_matrix_2 = torch.einsum(
                     "nd,md->nm", z2, centers)
-                
+
                 # only in case of hdbscan
                 # if z_center_similarity_matrix_1.shape[1] < self.topk2:
                 #     self.topk1 = z_center_similarity_matrix_1.shape[1]
@@ -448,55 +451,69 @@ class NNmemoryBankModule2(MemoryBankModule):
                 #     self.topk2 = z_center_similarity_matrix_2.shape[1]
 
                 # find top cluster centers for each batch embedding
-                _, topk_clusters_1 = torch.topk(z_center_similarity_matrix_1, self.topk1, dim=1)
-                _, topk_clusters_2 = torch.topk(z_center_similarity_matrix_2, self.topk2, dim=1)
+                _, topk_clusters_1 = torch.topk(
+                    z_center_similarity_matrix_1, self.topk1, dim=1)
+                _, topk_clusters_2 = torch.topk(
+                    z_center_similarity_matrix_2, self.topk2, dim=1)
 
                 z1_final = z1.clone()
                 z2_final = z2.clone()
                 for i in range(topk_clusters_1.shape[0]):
 
-                    clusters_1 = topk_clusters_1[i,:]
-                    clusters_2 = topk_clusters_2[i,:]
+                    clusters_1 = topk_clusters_1[i, :]
+                    clusters_2 = topk_clusters_2[i, :]
 
                     # find indexes that belong to the top cluster for batch embedding i
-                    indices_1 = (labels[..., None] == clusters_1).any(-1).nonzero().squeeze()
-                    indices_2 = (labels[..., None] == clusters_2).any(-1).nonzero().squeeze()
+                    indices_1 = (labels[..., None] ==
+                                 clusters_1).any(-1).nonzero().squeeze()
+                    indices_2 = (labels[..., None] ==
+                                 clusters_2).any(-1).nonzero().squeeze()
 
                     if indices_1.nelement() == 0:
-                        _, topk_indices_1 = torch.topk(similarity_matrix1[i, :], k, dim=0)
+                        _, topk_indices_1 = torch.topk(
+                            similarity_matrix1[i, :], k, dim=0)
                     else:
                         # create similarity matrix between batch embedding & selected memory embeddings
-                        tmp = bank_normed[indices_1, :].unsqueeze(0) if indices_1.nelement() == 1 else bank_normed[indices_1, :]
+                        tmp = bank_normed[indices_1, :].unsqueeze(
+                            0) if indices_1.nelement() == 1 else bank_normed[indices_1, :]
                         z_memory_similarity_matrix_1 = torch.einsum(
-                            "nd,md->nm", z1[i,:].unsqueeze(0), tmp)
-                        
+                            "nd,md->nm", z1[i, :].unsqueeze(0), tmp)
+
                         # find indices of topk NN for each view
                         if z_memory_similarity_matrix_1.dim() < 2:
-                            _, topk_indices_1 = torch.topk(similarity_matrix1[i, :], k, dim=0)
+                            _, topk_indices_1 = torch.topk(
+                                similarity_matrix1[i, :], k, dim=0)
                             topk_indices_1 = topk_indices_1.unsqueeze(0)
                         elif z_memory_similarity_matrix_1.shape[1] <= k:
-                            _, topk_indices_1 = torch.topk(similarity_matrix1[i, :], k, dim=0)
+                            _, topk_indices_1 = torch.topk(
+                                similarity_matrix1[i, :], k, dim=0)
                             topk_indices_1 = topk_indices_1.unsqueeze(0)
                         else:
-                            _, topk_indices_1 = torch.topk(z_memory_similarity_matrix_1, k, dim=1)
+                            _, topk_indices_1 = torch.topk(
+                                z_memory_similarity_matrix_1, k, dim=1)
 
                     if indices_2.nelement() == 0:
-                        _, topk_indices_2 = torch.topk(similarity_matrix2[i, :], k, dim=0)
+                        _, topk_indices_2 = torch.topk(
+                            similarity_matrix2[i, :], k, dim=0)
                     else:
                         # create similarity matrix between batch embedding & selected memory embeddings
-                        tmp = bank_normed[indices_2, :].unsqueeze(0) if indices_2.nelement() == 1 else bank_normed[indices_2, :]
+                        tmp = bank_normed[indices_2, :].unsqueeze(
+                            0) if indices_2.nelement() == 1 else bank_normed[indices_2, :]
                         z_memory_similarity_matrix_2 = torch.einsum(
-                            "nd,md->nm", z2[i,:].unsqueeze(0), tmp)
-                        
+                            "nd,md->nm", z2[i, :].unsqueeze(0), tmp)
+
                         # find indices of topk NN for each view
                         if z_memory_similarity_matrix_2.dim() < 2:
-                            _, topk_indices_2 = torch.topk(similarity_matrix2[i, :], k, dim=0)
+                            _, topk_indices_2 = torch.topk(
+                                similarity_matrix2[i, :], k, dim=0)
                             topk_indices_2 = topk_indices_2.unsqueeze(0)
                         elif z_memory_similarity_matrix_2.shape[1] < k:
-                            _, topk_indices_2 = torch.topk(similarity_matrix2[i, :], k, dim=0)
+                            _, topk_indices_2 = torch.topk(
+                                similarity_matrix2[i, :], k, dim=0)
                             topk_indices_2 = topk_indices_2.unsqueeze(0)
                         else:
-                            _, topk_indices_2 = torch.topk(z_memory_similarity_matrix_2, k, dim=1)
+                            _, topk_indices_2 = torch.topk(
+                                z_memory_similarity_matrix_2, k, dim=1)
                     #######################
                     if topk_indices_1.dim() < 2:
                         topk_indices_1 = topk_indices_1.unsqueeze(0)
@@ -509,7 +526,7 @@ class NNmemoryBankModule2(MemoryBankModule):
                             bank, dim=0, index=topk_indices_1[:, j])), 0)
                         z2_final = torch.cat((z2_final, torch.index_select(
                             bank, dim=0, index=topk_indices_2[:, j])), 0)
-                        
+
                 # concat the embeddings of the 2 views
                 z = torch.cat((z1_final, z2_final), 0)
             else:
@@ -544,7 +561,7 @@ class NNmemoryBankModule2(MemoryBankModule):
     #     bsz = output.shape[0] // 2
     #     z1, z2 = torch.split(
     #         output, [bsz, bsz], dim=0)
-        
+
     #     # if memory is full
     #     if ptr + bsz >= self.size:
     #         # cluster memory embeddings for the first time
@@ -555,28 +572,28 @@ class NNmemoryBankModule2(MemoryBankModule):
     #             # Visualize memory embeddings using tSNE
     #             if self.origin == "teacher" or self.origin == "student":
     #                 visualize_memory_embeddings(np.array(self.bank.T.detach().cpu()),
-    #                                             np.array(self.labels.detach().cpu()), 
-    #                                             args.num_clusters, args.save_path, 
+    #                                             np.array(self.labels.detach().cpu()),
+    #                                             args.num_clusters, args.save_path,
     #                                             origin=self.origin, epoch=epoch)
-            
+
     #         # cluster memory embeddings every args.cluster_freq epochs
     #         elif self.start_clustering == True and epoch % args.cluster_freq == 0 and epoch != self.last_cluster_epoch:
     #             self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
     #             self.last_cluster_epoch = epoch
     #             print("--Clusters Size--: {}-------\n".format(self.centers.size()))
     #             print("--Unique Labels Counts--: {}-------\n".format(self.labels.unique(return_counts=True)))
-                
+
     #             # Visualize memory embeddings using tSNE
     #             if self.origin == "teacher" or self.origin == "student":
     #                 visualize_memory_embeddings(np.array(self.bank.T.detach().cpu()),
-    #                                             np.array(self.labels.detach().cpu()), 
-    #                                             args.num_clusters, args.save_path, 
+    #                                             np.array(self.labels.detach().cpu()),
+    #                                             args.num_clusters, args.save_path,
     #                                             origin=self.origin, epoch=epoch)
 
     #         bank = self.bank.clone().cuda().detach()
     #         # Add latest batch to the memory queue based on their most similar memory cluster centers
     #         self.add_memory_embdeddings(z1, bank, sim_threshold=args.sim_threshold)
-    #         use_clustering = True if args.use_cluster_select else False 
+    #         use_clustering = True if args.use_cluster_select else False
 
     #     else:
     #         # Add latest batch to the memory queue (update memory only from 1st view)
@@ -597,13 +614,13 @@ class NNmemoryBankModule2(MemoryBankModule):
     #         # split embeddings of the 2 views
     #         z1, z2 = torch.split(
     #             output_normed, [args.batch_size, args.batch_size], dim=0)
-            
+
     #         # create similarity matrix between batch & memory embeddings
     #         similarity_matrix1 = torch.einsum(
     #             "nd,md->nm", z1, bank_normed)
     #         similarity_matrix2 = torch.einsum(
     #             "nd,md->nm", z2, bank_normed)
-            
+
     #         # if clustering is used for memory upating, use clustering for NN selection as well
     #         if use_clustering:
     #             centers = self.centers.clone().cuda()
@@ -662,14 +679,14 @@ class NNmemoryBankModule2(MemoryBankModule):
     #                     topk_indices_2 = topk_indices_2.unsqueeze(0)
     #                 else:
     #                     _, topk_indices_2 = torch.topk(z_memory_similarity_matrix_2, k, dim=1)
-                    
+
     #                 # concat topk NN embeddings to original embeddings for each view
     #                 for j in range(k):
     #                     z1_final = torch.cat((z1_final, torch.index_select(
     #                         bank, dim=0, index=topk_indices_1[:, j])), 0)
     #                     z2_final = torch.cat((z2_final, torch.index_select(
     #                         bank, dim=0, index=topk_indices_2[:, j])), 0)
-                        
+
     #             # concat the embeddings of the 2 views
     #             z = torch.cat((z1_final, z2_final), 0)
     #         else:
@@ -689,7 +706,7 @@ class NNmemoryBankModule2(MemoryBankModule):
     #         return z
     #     else:
     #         return output
-        
+
     # # def forward(self,
     # #             output: torch.Tensor,
     # #             epoch: int,
@@ -697,21 +714,21 @@ class NNmemoryBankModule2(MemoryBankModule):
     # #             k: int = 5,
     # #             labels: torch.Tensor = None,
     # #             update: bool = False):
-        
+
     # #     ptr = int(self.bank_ptr) if self.bank.nelement() != 0 else 0
 
     # #     # split embeddings of the 2 views
     # #     bsz = output.shape[0] // 2
     # #     z1, z2 = torch.split(
     # #         output, [bsz, bsz], dim=0)
-        
+
     # #     # if memory is full
     # #     if ptr + bsz >= self.size:
     # #         # cluster memory embeddings for the first time
     # #         if self.start_clustering == False:
     # #             self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
     # #             self.start_clustering = True
-            
+
     # #         # cluster memory embeddings every args.cluster_freq epochs
     # #         elif epoch % args.cluster_freq == 0 and epoch != self.last_cluster_epoch:
     # #             self.cluster_memory_embeddings(cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
@@ -720,12 +737,12 @@ class NNmemoryBankModule2(MemoryBankModule):
     # #         bank = self.bank.clone().cuda().detach()
     # #         # Add latest batch to the memory queue based on their most similar memory cluster centers
     # #         self.add_memory_embdeddings(z1, bank, sim_threshold=args.sim_threshold)
-           
+
     # #     else:
     # #         # Add latest batch to the memory queue (update memory only from 1st view)
     # #         z1, bank = super(NNmemoryBankModule2, self).forward(
     # #             z1, labels, update)
-            
+
     # #     bank = bank.to(output.device).t()
     # #     output = torch.cat((z1, z2), 0)
 
@@ -739,7 +756,7 @@ class NNmemoryBankModule2(MemoryBankModule):
     # #         # split embeddings of the 2 views
     # #         z1, z2 = torch.split(
     # #             output_normed, [args.batch_size, args.batch_size], dim=0)
-            
+
     # #         # create similarity matrix between batch & memory embeddings
     # #         similarity_matrix1 = torch.einsum(
     # #             "nd,md->nm", z1, bank_normed)
@@ -764,6 +781,7 @@ class NNmemoryBankModule2(MemoryBankModule):
     # #         return output
     # #     else:
     # #         return output
+
 
 @torch.no_grad()
 def distributed_sinkhorn(out, epsilon, iterations):
@@ -793,6 +811,3 @@ def distributed_sinkhorn(out, epsilon, iterations):
     Q *= B  # the colomns must sum to 1 so that Q is an assignment
     # print(torch.sum(Q, dim=1, keepdim=True))
     return Q.t()
-
-
-        

@@ -1,6 +1,6 @@
 from __future__ import print_function
 from torch.utils.tensorboard import SummaryWriter
-from models.msiam import MSiamLoss, swav_loss, ot_assignment_loss
+from models.msiam import MSiamLoss, swav_loss, ClusterLoss
 from utils import get_params_groups, get_world_size, clip_gradients, \
     cancel_gradients_last_layer, build_fewshot_loader, load_distil_model, build_student_teacher
 from utils import AverageMeter, grad_logger, apply_mask_resnet, bool_flag, LARS, cosine_scheduler, save_student_teacher, load_student_teacher, fix_random_seeds, init_distributed_mode
@@ -80,7 +80,7 @@ def args_parser():
                         help="cluster center visualization frequency")
     parser.add_argument("--memory_scale", default=20, type=int,
                         help="memory size compared to number of clusters, i.e.: memory_size = memory_scale * num_clusters")
-    parser.add_argument('--use_cluster_select', default=False, type=bool_flag,
+    parser.add_argument('--use_cluster_select', default=True, type=bool_flag,
                         help="Whether to use online clustering")
 
     # memory
@@ -224,8 +224,8 @@ def args_parser():
                         should not be passed as argument""")
     parser.add_argument("--rank", default=0, type=int, help="""rank of this process:
                         it is set automatically and should not be passed as argument""")
-    # parser.add_argument("--local_rank", default=0, type=int,
-    #                     help="this argument is not used and should be ignored")
+    parser.add_argument("--local_rank", default=0, type=int,
+                        help="this argument is not used and should be ignored")
 
     return parser
 
@@ -278,6 +278,7 @@ def train_msiam(args):
     msiam_loss = MSiamLoss(args, lamb_neg=args.lamb_neg,
                            lamb_patch=args.lamb_patch,
                            temp=args.temp).cuda()
+    cluster_loss = ClusterLoss().cuda()
 
     # ============ preparing memory queue ... ============
     # 2 ** 16
@@ -291,19 +292,11 @@ def train_msiam(args):
     student_f_nn_replacer = NNmemoryBankModule2(
         size=memory_size, origin="student_f")
 
-    suffix = ""
-    if args.use_nnclr:
-        suffix = "NNCLR"
-    elif args.enhance_batch:
-        suffix = "BI"
-    local_runs = os.path.join("runs", "7_{}_B-{}_O-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_UM_{}_AS_{}_AT_{}_CL{}-{}-{}-{}-{}_W{}_{}_{}_{}".format(
-        args.dataset,
-        args.backbone, args.optimizer, args.lr, args.mask_ratio[0], args.out_dim,
+    local_runs = os.path.join("runs", "9_{}_B-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_CL{}-{}_W{}_{}_CL{}-{}-{}-{}".format(
+        args.dataset, args.backbone, args.lr, args.mask_ratio[0], args.out_dim,
         args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
-        args.topk, args.use_memory_in_loss, args.use_feature_align,
-        args.use_feature_align_teacher, args.use_cluster_select, args.num_clusters,
-        args.memory_scale, args.memory_dist_metric, args.memory_momentum,
-        args.lamb_neg, args.uniformity_config, suffix, args.seed))
+        args.topk, args.num_clusters, args.memory_scale, args.lamb_neg, args.uniformity_config,
+        args.use_clustering, args.cls_use_enhanced_batch, args.cls_use_both_views, args.seed))
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
     writer = SummaryWriter(log_dir=local_runs)
@@ -365,7 +358,7 @@ def train_msiam(args):
         # ============ training one epoch of MSiam ... ============
         loss = train_one_epoch(data_loader, student, teacher, optimizer, fp16_scaler, epoch,
                                lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss,
-                               args, teacher_nn_replacer, student_nn_replacer, student_f_nn_replacer, distil_model)
+                               args, teacher_nn_replacer, student_nn_replacer, student_f_nn_replacer, distil_model, cluster_loss)
         time2 = time.time()
 
         print('epoch {}, total time {:.2f}'.format(epoch+1, time2 - time1))
@@ -405,7 +398,7 @@ def train_msiam(args):
 
 def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoch,
                     lr_schedule, wd_schedule, momentum_schedule, writer, msiam_loss,
-                    args, teacher_nn_replacer, student_nn_replacer, student_f_nn_replacer=None, distil_model=None):
+                    args, teacher_nn_replacer, student_nn_replacer, student_f_nn_replacer=None, distil_model=None, cluster_loss=None):
     """one epoch training"""
     student.train()
 
@@ -520,17 +513,17 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     w_ori=args.w_ori,
                     memory=teacher_nn_replacer.bank.cuda())
 
-                # if args.use_clustering and epoch > args.memory_start_epoch:
-                if args.use_clustering and teacher_nn_replacer.start_clustering:        # CHANGE BACK
-                    cluster_loss = ot_assignment_loss(
-                        args, p, z_teacher, student_nn_replacer)
-                    if cluster_loss.isnan().any():
-                        print("AAAA")
-                        exit()
+                if args.use_clustering and epoch > args.memory_start_epoch:
+                    # if args.use_clustering and teacher_nn_replacer.start_clustering:        # CHANGE BACK
+                    cl_loss = cluster_loss(
+                        args, p, z_teacher, teacher_nn_replacer)
+                    if cl_loss.isnan().any():
+                        print("NaN in clustering loss \n\n\n\n")
+                        cl_loss = 0
                 else:
-                    cluster_loss = 0
+                    cl_loss = 0
 
-        loss = loss_state['loss'] + args.w_clustering * cluster_loss
+        loss = loss_state['loss'] + args.w_clustering * cl_loss
         # student update
         optimizer.zero_grad()
         param_norms = None
@@ -561,7 +554,7 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
 
         # logging
         loss_hist.update(loss.item(), bsz)
-        loss_cluster_hist.update(cluster_loss, bsz)
+        loss_cluster_hist.update(cl_loss, bsz)
         loss_pos_hist.update(loss_state["loss_pos"].item(), bsz)
         loss_neg_hist.update(loss_state["loss_neg"].item(), bsz)
         if args.dist:
