@@ -226,6 +226,8 @@ def args_parser():
                         it is set automatically and should not be passed as argument""")
     parser.add_argument("--local_rank", default=0, type=int,
                         help="this argument is not used and should be ignored")
+    parser.add_argument('--use_single_memory', type=bool_flag, default=False,
+                        help="""Whether to use separate memories for student & teacher""")
 
     return parser
 
@@ -285,12 +287,19 @@ def train_msiam(args):
     memory_size = (args.memory_scale * args.num_clusters //
                    (args.batch_size * 2) + 1) * args.batch_size * 2 + 1
     print("Memory Size: {} \n".format(memory_size))
-    teacher_nn_replacer = NNmemoryBankModule2(
-        size=memory_size, origin="teacher")
-    student_nn_replacer = NNmemoryBankModule2(
-        size=memory_size, origin="student")
-    student_f_nn_replacer = NNmemoryBankModule2(
-        size=memory_size, origin="student_f")
+    if args.use_single_memory:
+        teacher_nn_replacer = None
+        student_nn_replacer = NNmemoryBankModule2(
+            size=memory_size, origin="student")
+        student_f_nn_replacer = NNmemoryBankModule2(
+            size=memory_size, origin="student_f")
+    else:
+        teacher_nn_replacer = NNmemoryBankModule2(
+            size=memory_size, origin="teacher")
+        student_nn_replacer = NNmemoryBankModule2(
+            size=memory_size, origin="student")
+        student_f_nn_replacer = NNmemoryBankModule2(
+            size=memory_size, origin="student_f")
 
     local_runs = os.path.join("runs", "9_{}_B-{}_L-{}_M-{}_D-{}_E-{}_D_{}_MP_{}_SE{}_top{}_CL{}-{}_W{}_{}_CL{}-{}-{}-{}".format(
         args.dataset, args.backbone, args.lr, args.mask_ratio[0], args.out_dim,
@@ -488,12 +497,20 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                 # concat the features of top-k neighbors for both student &
                 # teacher if batch size increase is activated
                 if args.enhance_batch:
-                    z_teacher = teacher_nn_replacer.get_top_kNN(
-                        z_teacher.detach(), epoch, args, k=args.topk, update=True)
-                    p = student_nn_replacer.get_top_kNN(
-                        p, epoch, args, k=args.topk, update=True)
-                    z_student = student_f_nn_replacer.get_top_kNN(
-                        z_student, epoch, args, k=args.topk, update=True)
+                    if args.use_single_memory:
+                        z_teacher = student_f_nn_replacer.get_top_kNN(
+                            z_teacher.detach(), epoch, args, k=args.topk, update=True)
+                        p = student_nn_replacer.get_top_kNN(
+                            p, epoch, args, k=args.topk, update=True)
+                        z_student = student_f_nn_replacer.get_top_kNN(
+                            z_student, epoch, args, k=args.topk, update=True)
+                    else:
+                        z_teacher = teacher_nn_replacer.get_top_kNN(
+                            z_teacher.detach(), epoch, args, k=args.topk, update=True)
+                        p = student_nn_replacer.get_top_kNN(
+                            p, epoch, args, k=args.topk, update=True)
+                        z_student = student_f_nn_replacer.get_top_kNN(
+                            z_student, epoch, args, k=args.topk, update=True)
 
                     # apply feature alignment
                     if args.use_feature_align:
@@ -514,7 +531,8 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     memory=teacher_nn_replacer.bank.cuda())
 
                 if args.use_clustering and epoch > args.memory_start_epoch:
-                    # if args.use_clustering and teacher_nn_replacer.start_clustering:        # CHANGE BACK
+                    # if args.use_clustering and teacher_nn_replacer.start_clustering:  # CHANGE BACK
+                    # torch.autograd.set_detect_anomaly(True)
                     cl_loss = cluster_loss(
                         args, p, z_teacher, teacher_nn_replacer)
                     if cl_loss.isnan().any():
