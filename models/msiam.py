@@ -477,11 +477,12 @@ class MSiamLoss(nn.Module):
 class ClusterLoss(nn.Module):
     def __init__(self):
         super(ClusterLoss, self).__init__()
+        self.mse_loss = nn.MSELoss()
 
     def cross_entropy(self, x1, x2):
         # return -torch.mean(torch.sum(x1 * F.log_softmax(x2, dim=1), dim=1))
-        # return -torch.mean(torch.sum(x1 * torch.log(x2), dim=1))
-        return -torch.mean(torch.sum(x1 * x2, dim=1))
+        return -torch.mean(torch.sum(x1 * torch.log(x2), dim=1))
+        # return -torch.mean(torch.sum(x1 * x2, dim=1))
 
     def forward(self, args, p, z, memory):
         # get cluster prototypes
@@ -504,33 +505,27 @@ class ClusterLoss(nn.Module):
         pa_2 = pairwise_euclidean_distance(p2, centers)
 
         # apply optimal transport to get assignments (# BS x K)
-        #  #[:args.batch_size] to only get assignments for initial batch
         if args.cls_use_enhanced_batch:
             za_1 = distributed_sinkhorn(
-                za_1, args.epsilon, args.sinkhorn_iterations).requires_grad_()
+                za_1, args.epsilon, args.sinkhorn_iterations)
             za_2 = distributed_sinkhorn(
-                za_2, args.epsilon, args.sinkhorn_iterations).requires_grad_()
+                za_2, args.epsilon, args.sinkhorn_iterations)
             pa_1 = distributed_sinkhorn(
-                pa_1, args.epsilon, args.sinkhorn_iterations).requires_grad_()
+                pa_1, args.epsilon, args.sinkhorn_iterations)
             pa_2 = distributed_sinkhorn(
-                pa_2, args.epsilon, args.sinkhorn_iterations).requires_grad_()
+                pa_2, args.epsilon, args.sinkhorn_iterations)
         else:
             za_1 = distributed_sinkhorn(za_1, args.epsilon, args.sinkhorn_iterations)[
-                :args.batch_size].requires_grad_()
+                :args.batch_size]
             za_2 = distributed_sinkhorn(za_2, args.epsilon, args.sinkhorn_iterations)[
-                :args.batch_size].requires_grad_()
+                :args.batch_size]
             pa_1 = distributed_sinkhorn(pa_1, args.epsilon, args.sinkhorn_iterations)[
-                :args.batch_size].requires_grad_()
+                :args.batch_size]
             pa_2 = distributed_sinkhorn(pa_2, args.epsilon, args.sinkhorn_iterations)[
-                :args.batch_size].requires_grad_()
+                :args.batch_size]
 
-        # print(self.cross_entropy(za_1, pa_1))
-        # print(self.cross_entropy(za_1, za_1))
-        # mse_loss = nn.MSELoss()
-
-        # print(mse_loss(za_1, pa_1))
-        # print(mse_loss(za_1, za_1))
-        # exit()
+        # print(pa_1.requires_grad)
+        # print(self.cross_entropy(za_1, pa_1).requires_grad)
 
         if args.cls_use_both_views:
             return (self.cross_entropy(za_1, pa_1) + self.cross_entropy(za_1, pa_2) +
@@ -581,31 +576,29 @@ def code_predict(args, output, memory, model, x):
     return -torch.mean(torch.sum(q * F.log_softmax(x, dim=1), dim=1))
 
 
-@torch.no_grad()
+# @torch.no_grad()
 def distributed_sinkhorn(out, epsilon, iterations):
     # Q is K-by-B for consistency with notations from our paper
-    Q = torch.exp(out / epsilon).t()
-    B = Q.shape[1]   # number of samples to assign
-    K = Q.shape[0]  # how many prototypes
+    Q0 = torch.exp(out / epsilon).t()
+    B = Q0.shape[1]   # number of samples to assign
+    K = Q0.shape[0]  # how many prototypes
 
     # make the matrix sums to 1
-    sum_Q = torch.sum(Q)
+    sum_Q = torch.sum(Q0)
     if dist.is_available() and dist.is_initialized():
         dist.all_reduce(sum_Q)
-    Q /= sum_Q
+    Q = Q0 / sum_Q
 
     for it in range(iterations):
         # normalize each row: total weight per prototype must be 1/K
         sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
         if dist.is_available() and dist.is_initialized():
             dist.all_reduce(sum_of_rows)
-        Q /= sum_of_rows
-        Q /= K
+        Q1 = (Q / sum_of_rows) / K
 
         # normalize each column: total weight per sample must be 1/B
-        Q /= torch.sum(Q, dim=0, keepdim=True)
-        Q /= B
+        Q2 = (Q1 / torch.sum(Q1, dim=0, keepdim=True)) / B
 
-    Q *= B  # the colomns must sum to 1 so that Q is an assignment
+    # Q *= B  # the colomns must sum to 1 so that Q is an assignment
     # print(torch.sum(Q, dim=1, keepdim=True))
-    return Q.t()
+    return (Q2 * B).t()

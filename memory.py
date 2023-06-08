@@ -342,7 +342,7 @@ class NNmemoryBankModule2(MemoryBankModule):
             0, view.type(torch.int64), bank).cpu()  # UN x 512
         centers_next = centers_next / labels_count.float().unsqueeze(1)
 
-        # for clusters with no assignments, use their center from the perviosu iteration
+        # for clusters with no assignments, use their center from the previous iteration
         for i in deleted_labels:
             centers_next[i, :] = centers[i, :]
 
