@@ -6,6 +6,8 @@ from torchvision.transforms.functional import normalize
 
 import numpy as np
 import math
+import copy
+from supervised_finetuning import supervised_finetuning, supervised_finetuning_test
 
 from sklearn import metrics, preprocessing
 from sklearn.linear_model import LogisticRegression
@@ -13,8 +15,12 @@ from sklearn.svm import LinearSVC
 from tqdm import tqdm
 from pathlib import Path
 import torch.backends.cudnn as cudnn
+from utils import fix_random_seeds, init_distributed_mode
 
 from optimal_transport import OptimalTransport
+from cdfsl_benchmark.datasets import (ISIC_few_shot, CropDisease_few_shot,
+                                      EuroSAT_few_shot, Chest_few_shot)
+
 
 from utils import build_fewshot_loader, bool_flag, build_student_teacher
 
@@ -28,7 +34,7 @@ def args_parser():
     parser.add_argument('--eval_path', type=str,
                         default=None, help='path to tested model')
     parser.add_argument('--dataset', type=str, default='miniImageNet',
-                        choices=['tieredImageNet', 'miniImageNet'], help='dataset')
+                        choices=['tieredImageNet', 'miniImageNet', 'cdfsl'], help='dataset')
     parser.add_argument('--num_workers', type=int,
                         default=1, help='num of workers to use')
     parser.add_argument('--use_feature_align', default=False, type=bool_flag,
@@ -101,6 +107,35 @@ def args_parser():
     parser.add_argument('--use_student', default=True, type=bool_flag,
                         help='whether to use student or teacher encoder for eval')
 
+    parser.add_argument("--seed", type=int, default=42, help="seed")
+
+    ###############################################################
+    parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
+        distributed training; see https://pytorch.org/docs/stable/distributed.html""")
+    parser.add_argument("--world_size", default=-1, type=int, help="""
+                        number of processes: it is set automatically and
+                        should not be passed as argument""")
+    parser.add_argument("--rank", default=0, type=int, help="""rank of this process:
+                        it is set automatically and should not be passed as argument""")
+    parser.add_argument("--local_rank", default=0, type=int,
+                        help="this argument is not used and should be ignored")
+
+    # Supervised finetuning parameters
+    parser.add_argument('--fine_tune', default=False, type=bool_flag,
+                        help='whether to perform supervised fine-tuning')
+    parser.add_argument('--sup_finetune_lr', type=float, default=0.001,
+                        help='Learning rate for finetuning.')
+    parser.add_argument('--sup_finetune_epochs', type=int, default=15,
+                        help='How many epochs to finetune.')
+    parser.add_argument('--ft_freeze_backbone', default=True, type=bool_flag,
+                        help='Whether to freeze the backbone during finetuning.')
+    parser.add_argument('--finetune_batch_norm', default=False, type=bool_flag,
+                        help='Whether to update the batch norm parameters during finetuning.')
+    parser.add_argument('--ft_use_ot', default=True, type=bool_flag,
+                        help='Whether to use OT during finetuning.')
+    parser.add_argument('--use_prototypes_in_tuning', default=False, type=bool_flag,
+                        help='Whether to use prototypes during finetuning or just for initialization.')
+
     return parser
 
 
@@ -110,12 +145,91 @@ def groupedAvg(myArray, N):
     return result
 
 
+def finetune_fewshot(
+        args, encoder, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', power_norm=False, feature_extractor=None):
+
+    encoder.eval()
+    accs = {}
+    accs_ot = {}
+    print("==> Fine-tuning...")
+
+    for n_shot in n_shots:
+        accs[f'{n_shot}-shot'] = []
+        accs_ot[f'{n_shot}-shot'] = []
+
+    original_encoder_state = copy.deepcopy(encoder.state_dict())
+
+    # AAAAAAAAAAAAAAAAAA
+    # n_shot = 5
+    for idx, (episode, _) in enumerate(tqdm(loader)):
+        if episode.dim() > 4:
+            if idx == 0:
+                print("Episode Size CD-FSL: {}".format(episode.size()))
+            episode = episode.reshape((-1,)+episode.shape[2:])
+        if idx == 0:
+            print("Episode Size for eval: {}".format(episode.size()))
+
+        # acc = supervised_finetuning_test(encoder,
+        #                                  episode=episode,
+        #                                  inner_lr=args.sup_finetune_lr,
+        #                                  total_epochs=args.sup_finetune_epochs,
+        #                                  freeze_backbone=args.ft_freeze_backbone,
+        #                                  finetune_batch_norm=args.finetune_batch_norm,
+        #                                  device=torch.device('cuda'),
+        #                                  n_way=args.n_way,
+        #                                  n_query=n_query,
+        #                                  n_shot=n_shot,
+        #                                  max_n_shot=max(n_shots),
+        #                                  use_ot=args.ft_use_ot,
+        #                                  use_prototypes_in_tuning=args.use_prototypes_in_tuning)
+
+        # encoder.load_state_dict(original_encoder_state)
+        # accs[f'{n_shot}-shot'].append(acc)
+
+    # acc = np.array(accs[f'{n_shot}-shot'])
+    # mean = acc.mean()
+    # print('Mean Accuracy {}'.format(mean*100))
+
+        for n_shot in n_shots:
+            acc = supervised_finetuning_test(encoder,
+                                             episode=episode,
+                                             inner_lr=args.sup_finetune_lr,
+                                             total_epochs=args.sup_finetune_epochs,
+                                             freeze_backbone=args.ft_freeze_backbone,
+                                             finetune_batch_norm=args.finetune_batch_norm,
+                                             device=torch.device('cuda'),
+                                             n_way=args.n_way,
+                                             n_query=n_query,
+                                             n_shot=n_shot,
+                                             max_n_shot=max(n_shots),
+                                             use_ot=args.ft_use_ot,
+                                             use_prototypes_in_tuning=args.use_prototypes_in_tuning)
+
+            encoder.load_state_dict(original_encoder_state)
+            accs[f'{n_shot}-shot'].append(acc)
+
+    results = []
+    for n_shot in n_shots:
+        results_shot = []
+        acc = np.array(accs[f'{n_shot}-shot'])
+        mean = acc.mean()
+        std = acc.std()
+        c95 = 1.96*std/math.sqrt(acc.shape[0])
+
+        print('classifier: {}, power_norm: {}, {}-way {}-shot acc: {:.2f}+{:.2f}'.format(
+            classifier, power_norm, n_way, n_shot, mean*100, c95*100))
+        print("------------------------------------------------------\n")
+        results_shot.append(mean*100)
+        results_shot.append(c95*100)
+        results.append(results_shot)
+    return results
+
+
 @torch.no_grad()
 def evaluate_fewshot(
         encoder, use_transformers, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', power_norm=False, feature_extractor=None):
 
     encoder.eval()
-
     accs = {}
     accs_ot = {}
     print("==> Evaluating...")
@@ -125,8 +239,12 @@ def evaluate_fewshot(
         accs_ot[f'{n_shot}-shot'] = []
 
     for idx, (images, _) in enumerate(tqdm(loader)):
+        if images.dim() > 4:
+            if idx == 0:
+                print("Episode Size CD-FSL: {}".format(images.size()))
+            images = images.reshape((-1,)+images.shape[2:])
         if idx == 0:
-            print(images.size())
+            print("Episode Size for eval: {}".format(images.size()))
 
         images = images.cuda(non_blocking=True)
 
@@ -195,6 +313,10 @@ def evaluate_fewshot(
         # qry_f: TBS x n_way x n_query x D
         sup_f, qry_f = torch.split(f.view(
             test_batch_size, n_way, max_n_shot+n_query, -1), [max_n_shot, n_query], dim=2)
+        if idx == 0:
+            print("Total Features Size: {}".format(f.size()))
+            print("Support Features Size: {}".format(sup_f.size()))
+            print("Query Features Size: {}".format(qry_f.size()))
 
         qry_f = qry_f.reshape(test_batch_size, n_way *
                               n_query, -1).detach().cpu().numpy()
@@ -283,14 +405,16 @@ def evaluate_fewshot(
     return results
 
 
-def evaluate_msiam(args):
+def evaluate_imagenet(args):
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
 
+    if args.fine_tune:
+        args.test_batch_size = 1
+
     test_loader = build_fewshot_loader(args, 'test')
 
-    # model = build_model(args)
     student, teacher = build_student_teacher(args)
 
     if args.eval_path is not None:
@@ -312,11 +436,102 @@ def evaluate_msiam(args):
 
         feature_extractor = model.module.feature_extractor if "feature_extractor" in model.named_buffers() else None
 
-        evaluate_fewshot(model.module.encoder, model.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
-            1, 5], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+        if args.fine_tune:
+            finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[1, 5],
+                             n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+        else:
+            evaluate_fewshot(model.module.encoder, model.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
+                1, 5], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+
+            if "deit" in args.backbone:
+                student.module.encoder.masked_im_modeling = True
+        return
+
+
+def evaluate_cdfsl(args):
+    print("\n".join("%s: %s" % (k, str(v))
+          for k, v in sorted(dict(vars(args)).items())))
+    cudnn.benchmark = True
+
+    #####################################################
+    # few_shot_params = dict(n_way = args.n_way , n_support = params.n_test_shot)
+    dataset_names = ["ISIC", "EuroSAT", "CropDisease", "ChestX"]
+    test_loaders = []
+
+    loader_name = "ChestX"
+    print("Loading {}".format(loader_name))
+    datamgr = Chest_few_shot.SetDataManager(Path(args.data_path) / Path("chestX"),
+                                            args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+    test_loader = datamgr.get_data_loader(aug=False)
+
+    test_loaders.append((loader_name, test_loader))
+
+    print(len(test_loader))
+    exit()
+
+    loader_name = "ISIC"
+    print("Loading {}".format(loader_name))
+    datamgr = ISIC_few_shot.SetDataManager(
+        args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+    test_loader = datamgr.get_data_loader(aug=False)
+
+    test_loaders.append((loader_name, test_loader))
+
+    loader_name = "EuroSAT"
+    print("Loading {}".format(loader_name))
+    datamgr = EuroSAT_few_shot.SetDataManager(
+        args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+    test_loader = datamgr.get_data_loader(aug=False)
+
+    test_loaders.append((loader_name, test_loader))
+
+    loader_name = "CropDisease"
+    print("Loading {}".format(loader_name))
+    datamgr = CropDisease_few_shot.SetDataManager(
+        args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+    test_loader = datamgr.get_data_loader(aug=False)
+
+    test_loaders.append((loader_name, test_loader))
+
+    # for idx, (loader_name, test_loader) in enumerate(test_loaders):
+    #     print(len(test_loader))
+
+    # exit()
+    ####################################################
+
+    student, teacher = build_student_teacher(args)
+
+    if args.eval_path is not None:
+        # student, teacher = load_student_teacher(
+        #     student, teacher, args.eval_path, eval=True)
+
+        student.load_state_dict(torch.load(args.eval_path)
+                                ['student'], strict=True)
+        teacher.load_state_dict(torch.load(args.eval_path)
+                                ['teacher'], strict=True)
 
         if "deit" in args.backbone:
-            student.module.encoder.masked_im_modeling = True
+            student.module.encoder.masked_im_modeling = False
+
+        if args.use_student:
+            model = student
+        else:
+            model = teacher
+
+        feature_extractor = model.module.feature_extractor if "feature_extractor" in model.named_buffers() else None
+
+        # evaluate all datasets of the cd-fsl benchmark
+        for idx, (loader_name, test_loader) in enumerate(test_loaders):
+            print("---------- {} ------------".format(loader_name))
+            if args.fine_tune:
+                finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[5, 20],
+                                 n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+            else:
+                evaluate_fewshot(model.module.encoder, model.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
+                    5, 20], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+
+            if "deit" in args.backbone:
+                student.module.encoder.masked_im_modeling = True
         return
 
 
@@ -329,4 +544,10 @@ if __name__ == '__main__':
 
     args.split_path = (Path(__file__).parent).joinpath('split')
 
-    evaluate_msiam(args)
+    init_distributed_mode(args)
+    fix_random_seeds(args.seed)
+
+    if args.dataset == "tieredImageNet" or args.dataset == "miniImageNet":
+        evaluate_imagenet(args)
+    else:
+        evaluate_cdfsl(args)
