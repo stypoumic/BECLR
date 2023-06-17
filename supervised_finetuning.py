@@ -321,6 +321,7 @@ def supervised_finetuning_test(encoder, episode, device='cuda',
                 module.eval()
 
     # print("Support Feature Size: {}".format(z_support.size()))
+    # print("Support Size: {}".format(support_size))
     # print("Support Labels Size: {}".format(y_support.size()))
 
     for epoch in tqdm(range(total_epochs), total=total_epochs, leave=False):

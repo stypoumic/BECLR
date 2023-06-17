@@ -466,29 +466,26 @@ def evaluate_cdfsl(args):
 
     test_loaders.append((loader_name, test_loader))
 
-    print(len(test_loader))
-    exit()
-
     loader_name = "ISIC"
     print("Loading {}".format(loader_name))
-    datamgr = ISIC_few_shot.SetDataManager(
-        args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+    datamgr = ISIC_few_shot.SetDataManager(Path(args.data_path) / Path("ISIC"),
+                                           args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
     test_loader = datamgr.get_data_loader(aug=False)
 
     test_loaders.append((loader_name, test_loader))
 
     loader_name = "EuroSAT"
     print("Loading {}".format(loader_name))
-    datamgr = EuroSAT_few_shot.SetDataManager(
-        args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+    datamgr = EuroSAT_few_shot.SetDataManager(Path(args.data_path) / Path("EuroSAT/2750"),
+                                              args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
     test_loader = datamgr.get_data_loader(aug=False)
 
     test_loaders.append((loader_name, test_loader))
 
     loader_name = "CropDisease"
     print("Loading {}".format(loader_name))
-    datamgr = CropDisease_few_shot.SetDataManager(
-        args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+    datamgr = CropDisease_few_shot.SetDataManager(Path(args.data_path) / Path("plant-disease"),
+                                                  args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
     test_loader = datamgr.get_data_loader(aug=False)
 
     test_loaders.append((loader_name, test_loader))
@@ -496,7 +493,6 @@ def evaluate_cdfsl(args):
     # for idx, (loader_name, test_loader) in enumerate(test_loaders):
     #     print(len(test_loader))
 
-    # exit()
     ####################################################
 
     student, teacher = build_student_teacher(args)
