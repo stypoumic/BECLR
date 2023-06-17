@@ -13,8 +13,11 @@ from sklearn.svm import LinearSVC
 from tqdm import tqdm
 from pathlib import Path
 import torch.backends.cudnn as cudnn
+from utils import fix_random_seeds, init_distributed_mode
 
 from utils import build_fewshot_loader, bool_flag, build_student_teacher
+from cdfsl_benchmark.datasets import (ISIC_few_shot, CropDisease_few_shot,
+                                      EuroSAT_few_shot, Chest_few_shot)
 
 
 def args_parser():
@@ -26,7 +29,7 @@ def args_parser():
     parser.add_argument('--eval_path', type=str,
                         default=None, help='path to tested model')
     parser.add_argument('--dataset', type=str, default='miniImageNet',
-                        choices=['tieredImageNet', 'miniImageNet'], help='dataset')
+                        choices=['tieredImageNet', 'miniImageNet', 'cdfsl'], help='dataset')
     parser.add_argument('--num_workers', type=int,
                         default=1, help='num of workers to use')
     parser.add_argument('--use_feature_align', default=False, type=bool_flag,
@@ -95,9 +98,21 @@ def args_parser():
     parser.add_argument('--n_test_task', type=int,
                         default=3000, help='total test few-shot episodes')
     parser.add_argument('--test_batch_size', type=int,
-                        default=5, help='episode_batch_size')
+                        default=4, help='episode_batch_size')
     parser.add_argument('--use_student', default=True, type=bool_flag,
                         help='whether to use student or teacher encoder for eval')
+    parser.add_argument("--seed", type=int, default=42, help="seed")
+
+    ###############################################################
+    parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
+        distributed training; see https://pytorch.org/docs/stable/distributed.html""")
+    parser.add_argument("--world_size", default=-1, type=int, help="""
+                        number of processes: it is set automatically and
+                        should not be passed as argument""")
+    parser.add_argument("--rank", default=0, type=int, help="""rank of this process:
+                        it is set automatically and should not be passed as argument""")
+    parser.add_argument("--local_rank", default=0, type=int,
+                        help="this argument is not used and should be ignored")
 
     return parser
 
@@ -115,6 +130,9 @@ def evaluate_fewshot(
         accs[f'{n_shot}-shot'] = []
 
     for idx, (images, _) in enumerate(tqdm(loader)):
+        if images.dim() > 4:
+            print(images.size())
+            images = images.reshape((-1,)+images.shape[2:])
         if idx == 0:
             print(images.size())
 
@@ -179,9 +197,12 @@ def evaluate_fewshot(
         # print("After Normalization: {}".format(not torch.isfinite(f).any()))
 
         max_n_shot = max(n_shots)
+        print(f.size())
         test_batch_size = int(f.shape[0]/n_way/(n_query+max_n_shot))
         sup_f, qry_f = torch.split(f.view(
             test_batch_size, n_way, max_n_shot+n_query, -1), [max_n_shot, n_query], dim=2)
+        print(sup_f.size())
+        exit()
 
         qry_f = qry_f.reshape(test_batch_size, n_way *
                               n_query, -1).detach().cpu().numpy()
@@ -228,14 +249,13 @@ def evaluate_fewshot(
     return results
 
 
-def evaluate_msiam(args):
+def evaluate_imagenet(args):
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
 
     test_loader = build_fewshot_loader(args, 'test')
 
-    # model = build_model(args)
     student, teacher = build_student_teacher(args)
 
     if args.eval_path is not None:
@@ -265,6 +285,85 @@ def evaluate_msiam(args):
         return
 
 
+def evaluate_cdfsl(args):
+    print("\n".join("%s: %s" % (k, str(v))
+          for k, v in sorted(dict(vars(args)).items())))
+    cudnn.benchmark = True
+
+    #####################################################
+    # few_shot_params = dict(n_way = args.n_way , n_support = params.n_test_shot)
+    dataset_names = ["ISIC", "EuroSAT", "CropDisease", "ChestX"]
+    test_loaders = []
+
+    loader_name = "ChestX"
+    print("Loading {}".format(loader_name))
+    datamgr = Chest_few_shot.SetDataManager(
+        args.size, n_eposide=args.n_test_task, n_query=args.n_query)
+    test_loader = datamgr.get_data_loader(aug=False)
+
+    test_loaders.append((loader_name, test_loader))
+
+    loader_name = "ISIC"
+    print("Loading {}".format(loader_name))
+    datamgr = ISIC_few_shot.SetDataManager(
+        args.size, n_eposide=args.n_test_task, n_query=args.n_query)
+    test_loader = datamgr.get_data_loader(aug=False)
+
+    test_loaders.append((loader_name, test_loader))
+
+    loader_name = "EuroSAT"
+    print("Loading {}".format(loader_name))
+    datamgr = EuroSAT_few_shot.SetDataManager(
+        args.size, n_eposide=args.n_test_task, n_query=args.n_query)
+    test_loader = datamgr.get_data_loader(aug=False)
+
+    test_loaders.append((loader_name, test_loader))
+
+    loader_name = "CropDisease"
+    print("Loading {}".format(loader_name))
+    datamgr = CropDisease_few_shot.SetDataManager(
+        args.size, n_eposide=args.n_test_task, n_query=args.n_query)
+    test_loader = datamgr.get_data_loader(aug=False)
+
+    test_loaders.append((loader_name, test_loader))
+
+    for idx, (loader_name, test_loader) in enumerate(test_loaders):
+        print(len(test_loader))
+
+    # exit()
+    ####################################################
+
+    student, teacher = build_student_teacher(args)
+
+    if args.eval_path is not None:
+        # student, teacher = load_student_teacher(
+        #     student, teacher, args.eval_path, eval=True)
+
+        student.load_state_dict(torch.load(args.eval_path)
+                                ['student'], strict=True)
+        teacher.load_state_dict(torch.load(args.eval_path)
+                                ['teacher'], strict=True)
+
+        if "deit" in args.backbone:
+            student.module.encoder.masked_im_modeling = False
+
+        if args.use_student:
+            model = student
+        else:
+            model = teacher
+
+        feature_extractor = model.module.feature_extractor if "feature_extractor" in model.named_buffers() else None
+
+        # evaluate all datasets of the cd-fsl benchmark
+        for idx, (loader_name, test_loader) in enumerate(test_loaders):
+            evaluate_fewshot(model.module.encoder, model.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
+                1, 5], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+
+            if "deit" in args.backbone:
+                student.module.encoder.masked_im_modeling = True
+        return
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         'MSiam evaluation arguments', parents=[args_parser()])
@@ -274,4 +373,11 @@ if __name__ == '__main__':
 
     args.split_path = (Path(__file__).parent).joinpath('split')
 
-    evaluate_msiam(args)
+    init_distributed_mode(args)
+    fix_random_seeds(args.seed)
+
+    if args.dataset == "tieredImageNet" or args.dataset == "miniImageNet":
+        evaluate_imagenet(args)
+    else:
+        print("AAAA")
+        evaluate_cdfsl(args)
