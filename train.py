@@ -55,7 +55,7 @@ def args_parser():
                         help="Whether to use feature alignment on the teacher features")
     parser.add_argument('--w_ori', type=float,
                         default=1.0, help='weight of original features (in case of refinement)')
-    parser.add_argument("--seed", type=int, default=31, help="seed")
+    parser.add_argument("--seed", type=int, default=42, help="seed")
     parser.add_argument('--uniformity_config', type=str, default='SS',
                         choices=['ST', 'SS', 'TT'], help='Choice of unifmormity configurations')
 
@@ -376,7 +376,7 @@ def train_msiam(args):
             fp16 = fp16_scaler.state_dict() if args.use_fp16 else None
             save_file = os.path.join(
                 args.save_path, 'epoch_{}.pth'.format(epoch + 1))
-            save_student_teacher(student, teacher, epoch + 1, loss,
+            save_student_teacher(args, student, teacher, epoch + 1, loss,
                                  optimizer, batch_size, save_file, teacher_nn_replacer,
                                  student_nn_replacer, student_f_nn_replacer,
                                  fp16_scaler=fp16)
@@ -528,10 +528,9 @@ def train_one_epoch(train_loader, student, teacher, optimizer, fp16_scaler, epoc
                     p_dist=p_dist,
                     z_dist=z_dist,
                     w_ori=args.w_ori,
-                    memory=teacher_nn_replacer.bank.cuda())
+                    memory=student_nn_replacer.bank.cuda())
 
-                if args.use_clustering and epoch > args.memory_start_epoch:
-                    # if args.use_clustering and teacher_nn_replacer.start_clustering:  # CHANGE BACK
+                if args.use_clustering and epoch > args.memory_start_epoch and teacher_nn_replacer.start_clustering:
                     # torch.autograd.set_detect_anomaly(True)
                     cl_loss = cluster_loss(
                         args, p, z_teacher, teacher_nn_replacer)

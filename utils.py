@@ -103,21 +103,6 @@ def init_distributed_mode(args):
         args.world_size = int(os.environ['WORLD_SIZE'])
         args.gpu = int(os.environ['LOCAL_RANK'])
 
-        ############### TO REMOVE #################
-
-        # # use gloo backend for local runs on windows
-        # dist.init_process_group(
-        #     backend="gloo",
-        #     world_size=args.world_size,
-        #     rank=args.rank,
-        # )
-        # torch.cuda.set_device(args.gpu)
-        # print('| distributed init (rank {}): {}'.format(
-        #     args.rank, args.dist_url), flush=True)
-        # dist.barrier()
-        # return
-        ############### TO REMOVE #################
-
     # launched with submitit on a slurm cluster
     elif 'SLURM_PROCID' in os.environ:
         args.rank = int(os.environ['SLURM_PROCID'])
@@ -431,10 +416,16 @@ def save_model(model, epoch, loss, optimizer, batch_size, save_file, fp16_scaler
     del save_state
 
 
-def save_student_teacher(student, teacher, epoch, loss, optimizer, batch_size,
+def save_student_teacher(args, student, teacher, epoch, loss, optimizer, batch_size,
                          save_file, teacher_memory, student_memory,
                          student_proj_memory, fp16_scaler=None):
     print('==> Saving... \n')
+    if args.use_single_memory:
+        teacher_bank = student_proj_memory.bank
+        teacher_ptr = student_proj_memory.bank_ptr
+    else:
+        teacher_bank = teacher_memory.bank
+        teacher_ptr = teacher_memory.bank_ptr
     save_state = {
         'student': student.state_dict(),
         'teacher': teacher.state_dict(),
@@ -443,7 +434,7 @@ def save_student_teacher(student, teacher, epoch, loss, optimizer, batch_size,
         'optimizer': optimizer.state_dict(),
         'batch_size': batch_size,
         'fp16_scaler': fp16_scaler,
-        'teacher_memory': (teacher_memory.bank, teacher_memory.bank_ptr),
+        'teacher_memory': (teacher_bank, teacher_ptr),
         'student_memory': (student_memory.bank, student_memory.bank_ptr),
         'student_proj_memory': (student_proj_memory.bank, student_proj_memory.bank_ptr)
     }
