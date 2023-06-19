@@ -1,7 +1,6 @@
 # This code is modified from https://github.com/facebookresearch/low-shot-shrink-hallucinate
 
 from cdfsl_benchmark.datasets.miniImageNet_few_shot import TransformLoader as MiniImTransformLoader
-from cdfsl_benchmark.configs import *
 import sys
 import torch
 from PIL import Image
@@ -11,6 +10,7 @@ import torchvision.transforms as transforms
 import cdfsl_benchmark.datasets.additional_transforms as add_transforms
 from torch.utils.data import Dataset
 from abc import abstractmethod
+from pathlib import Path
 
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -19,14 +19,17 @@ sys.path.append("../")
 
 
 class CustomDatasetFromImages(Dataset):
-    def __init__(self, csv_path=ISIC_path + "/ISIC2018_Task3_Training_GroundTruth/ISIC2018_Task3_Training_GroundTruth.csv",
-                 image_path=ISIC_path + "/ISIC2018_Task3_Training_Input/"):
+    def __init__(self, data_path):
         """
         Args:
             csv_path (string): path to csv file
             img_path (string): path to the folder where images are
             transform: pytorch transforms for transforms and tensor conversion
         """
+        csv_path = str(Path(data_path) / Path(
+            "ISIC2018_Task3_Training_GroundTruth/ISIC2018_Task3_Training_GroundTruth.csv"))
+        image_path = str(Path(data_path) /
+                         Path("ISIC2018_Task3_Training_Input/"))
         self.img_path = image_path
         self.csv_path = csv_path
 
@@ -47,7 +50,8 @@ class CustomDatasetFromImages(Dataset):
         # Get image name from the pandas df
         single_image_name = self.image_name[index]
         # Open image
-        img_as_path = self.img_path + single_image_name + ".jpg"
+        img_as_path = str(Path(self.img_path) /
+                          Path(single_image_name)) + ".jpg"
         # Transform image to tensor
         # img_as_tensor = self.to_tensor(img_as_img)
 
@@ -69,7 +73,7 @@ def identity_transform(img_shape):
 
 
 class SimpleDataset:
-    def __init__(self, transform, original_transform,
+    def __init__(self, data_path, transform, original_transform,
                  target_transform=identity,
                  n_support=1, n_query=1,
                  no_aug_support=False, no_aug_query=False,
@@ -87,7 +91,7 @@ class SimpleDataset:
         self.no_aug_query = no_aug_query
 
         # Adaptation to unlabelled dataset
-        image_path = ISIC_path + "/ISIC2018_Task3_Training_Input/"
+        image_path = str(data_path) + "/ISIC2018_Task3_Training_Input/"
         with open('unsupervised-track/UNSUPERVISED_ISIC.txt') as f:
             image_names = f.readlines()
         self.image_paths = [image_path + n.strip() for n in image_names]
@@ -119,7 +123,7 @@ class SimpleDataset:
 
 
 class SetDataset:
-    def __init__(self, batch_size, transform):
+    def __init__(self, data_path, batch_size, transform):
 
         self.sub_meta = {}
         self.cl_list = range(7)
@@ -127,7 +131,7 @@ class SetDataset:
         for cl in self.cl_list:
             self.sub_meta[cl] = []
 
-        d = CustomDatasetFromImages()
+        d = CustomDatasetFromImages(data_path=data_path)
 
         for i, (data, label) in enumerate(d):
             self.sub_meta[label].append(data)
@@ -246,7 +250,7 @@ class SimpleDataManager(DataManager):
                                 no_aug_support=no_aug_support, no_aug_query=no_aug_query)
 
         data_loader_params = dict(
-            batch_size=self.batch_size, shuffle=True, num_workers=12, pin_memory=True)
+            batch_size=self.batch_size, shuffle=True, num_workers=8, pin_memory=True)
         data_loader = torch.utils.data.DataLoader(
             dataset, **data_loader_params)
 
@@ -254,8 +258,9 @@ class SimpleDataManager(DataManager):
 
 
 class SetDataManager(DataManager):
-    def __init__(self, image_size, n_way=5, n_support=5, n_query=16, n_eposide=100):
+    def __init__(self, data_path, image_size, n_way=5, n_support=5, n_query=16, n_eposide=100):
         super(SetDataManager, self).__init__()
+        self.data_path = data_path
         self.image_size = image_size
         self.n_way = n_way
         self.batch_size = n_support + n_query
@@ -265,11 +270,11 @@ class SetDataManager(DataManager):
 
     def get_data_loader(self, aug):  # parameters that would change on train/val set
         transform = self.trans_loader.get_composed_transform(aug)
-        dataset = SetDataset(self.batch_size, transform)
+        dataset = SetDataset(self.data_path, self.batch_size, transform)
         sampler = EpisodicBatchSampler(
             len(dataset), self.n_way, self.n_eposide)
         data_loader_params = dict(
-            batch_sampler=sampler,  num_workers=12, pin_memory=True)
+            batch_sampler=sampler,  num_workers=8, pin_memory=True)
         data_loader = torch.utils.data.DataLoader(
             dataset, **data_loader_params)
         return data_loader

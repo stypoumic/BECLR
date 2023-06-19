@@ -2,7 +2,6 @@
 
 from torchvision.datasets.folder import default_loader
 from cdfsl_benchmark.datasets.miniImageNet_few_shot import TransformLoader as MiniImTransformLoader
-from cdfsl_benchmark.configs import *
 import sys
 import torch
 import torchvision.transforms as transforms
@@ -25,7 +24,7 @@ def identity_transform(img_shape):
 
 
 class SimpleDataset:
-    def __init__(self, transform, original_transform,
+    def __init__(self, data_path, transform, original_transform,
                  target_transform=identity,
                  n_support=1, n_query=1,
                  no_aug_support=False, no_aug_query=False,
@@ -43,7 +42,7 @@ class SimpleDataset:
         self.no_aug_query = no_aug_query
 
         # Adaptation to unlabelled dataset
-        image_path = CropDisease_path + "/dataset/train/"
+        image_path = str(data_path) + "/dataset/train/"
         with open('unsupervised-track/UNSUPERVISED_CROPDISEASE.txt') as f:
             image_names = f.readlines()
         self.image_paths = [image_path + n.strip() for n in image_names]
@@ -75,7 +74,7 @@ class SimpleDataset:
 
 
 class SetDataset:
-    def __init__(self, batch_size, transform):
+    def __init__(self, data_path, batch_size, transform):
 
         self.sub_meta = {}
         self.cl_list = range(38)
@@ -84,7 +83,7 @@ class SetDataset:
             self.sub_meta[cl] = []
 
         # Dataset over image paths instead of images
-        d = ImageFolder(CropDisease_path + "/dataset/train/",
+        d = ImageFolder(str(data_path) + "/dataset/train/",
                         loader=lambda path: path)
 
         for i, (data, label) in enumerate(d):
@@ -204,7 +203,7 @@ class SimpleDataManager(DataManager):
                                 no_aug_support=no_aug_support, no_aug_query=no_aug_query)
 
         data_loader_params = dict(
-            batch_size=self.batch_size, shuffle=True, num_workers=12, pin_memory=True)
+            batch_size=self.batch_size, shuffle=True, num_workers=8, pin_memory=True)
         data_loader = torch.utils.data.DataLoader(
             dataset, **data_loader_params)
 
@@ -212,8 +211,9 @@ class SimpleDataManager(DataManager):
 
 
 class SetDataManager(DataManager):
-    def __init__(self, image_size, n_way=5, n_support=5, n_query=16, n_eposide=100):
+    def __init__(self, data_path, image_size, n_way=5, n_support=5, n_query=16, n_eposide=100):
         super(SetDataManager, self).__init__()
+        self.data_path = data_path
         self.image_size = image_size
         self.n_way = n_way
         self.batch_size = n_support + n_query
@@ -223,11 +223,11 @@ class SetDataManager(DataManager):
 
     def get_data_loader(self, aug):  # parameters that would change on train/val set
         transform = self.trans_loader.get_composed_transform(aug)
-        dataset = SetDataset(self.batch_size, transform)
+        dataset = SetDataset(self.data_path, self.batch_size, transform)
         sampler = EpisodicBatchSampler(
             len(dataset), self.n_way, self.n_eposide)
         data_loader_params = dict(
-            batch_sampler=sampler,  num_workers=12, pin_memory=True)
+            batch_sampler=sampler,  num_workers=8, pin_memory=True)
         data_loader = torch.utils.data.DataLoader(
             dataset, **data_loader_params)
         return data_loader

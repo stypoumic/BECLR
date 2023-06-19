@@ -1,7 +1,6 @@
 # This code is modified from https://github.com/facebookresearch/low-shot-shrink-hallucinate
 
 from cdfsl_benchmark.datasets.contrastive_augmentations import get_simCLR_transform, get_chestX_transform
-from cdfsl_benchmark.configs import *
 import sys
 import torch
 import torchvision.transforms as transforms
@@ -24,7 +23,7 @@ def identity_transform(img_shape):
 
 
 class SimpleDataset:
-    def __init__(self, transform, original_transform,
+    def __init__(self, data_path, transform, original_transform,
                  target_transform=identity,
                  n_support=1, n_query=1,
                  no_aug_support=False, no_aug_query=False,
@@ -40,7 +39,7 @@ class SimpleDataset:
         self.no_aug_support = no_aug_support
         self.no_aug_query = no_aug_query
 
-        self.dataset = ImageFolder(miniImageNet_path)
+        self.dataset = ImageFolder(str(data_path))
 
     def __getitem__(self, i):
         data, label = self.dataset[i]
@@ -68,7 +67,7 @@ class SimpleDataset:
 
 
 class SetDataset:
-    def __init__(self, batch_size, transform):
+    def __init__(self, data_path, batch_size, transform):
 
         self.sub_meta = {}
         self.cl_list = range(64)
@@ -76,7 +75,7 @@ class SetDataset:
         for cl in self.cl_list:
             self.sub_meta[cl] = []
 
-        d = ImageFolder(miniImageNet_path)
+        d = ImageFolder(str(data_path))
 
         for i, (data, label) in enumerate(d):
             self.sub_meta[label].append(data)
