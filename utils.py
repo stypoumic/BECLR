@@ -1,3 +1,4 @@
+import pickle
 import math
 import numpy as np
 import torch
@@ -5,6 +6,7 @@ import argparse
 import torch.optim as optim
 import torch.distributed as dist
 from torchvision import transforms
+import learn2learn as l2l
 from pathlib import Path
 import copy
 import os
@@ -13,6 +15,7 @@ from torch import nn
 
 from dataset.miniImageNet import miniImageNet
 from dataset.tieredImageNet import tieredImageNet
+from dataset.cub import CUBirds200
 from dataset.sampler import EpisodeSampler
 
 from models.msiam import MSiam
@@ -21,9 +24,52 @@ from models import resnet10, resnet18, resnet34, resnet50, vit_tiny
 from sklearn.manifold import TSNE
 from matplotlib import cm
 import matplotlib.pyplot as plt
-import numpy as np
-import pickle
-from pathlib import Path
+import seaborn as sns
+import pandas as pd
+from sklearn.metrics import davies_bouldin_score
+import warnings
+warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")
+from umap import UMAP  # noqa
+
+
+@torch.no_grad()
+def visualize_optimal_transport(z_support, z_query, y_support, y_query, proj, episode, n_shot, after_OT):
+    df_sup = pd.DataFrame(z_support)
+    df_sup['class'] = pd.Series(y_support)
+    df_sup['set'] = pd.Series(np.ones(len(df_sup.index)))
+
+    df_quer = pd.DataFrame(z_query)
+    df_quer['class'] = pd.Series(y_query)
+    df_quer['set'] = pd.Series(np.zeros(len(df_quer.index)))
+
+    df = pd.concat([df_sup, df_quer])
+    features = df.iloc[:, :-2]
+
+    if proj == "tsne":
+        tsne = TSNE(n_components=2, verbose=0)
+        proj_2d = tsne.fit_transform(features)
+    else:
+        umap = UMAP(n_components=2, init='random', random_state=0)
+        proj_2d = umap.fit_transform(features)
+
+    print("DBS score: {}".format(davies_bouldin_score(proj_2d, df['set'])))
+
+    # plt.figure(figsize=(25, 12))
+    # sns.relplot(x=proj_2d[:, 0], y=proj_2d[:, 1], hue=df['class'].astype(
+    #     int), palette="Dark2", style=df['set'].astype(int), s=df['set']*150+50, legend=False)
+    # a = sns.kdeplot(x=proj_2d[:, 0], y=proj_2d[:, 1],
+    #                 hue=df['class'].astype(int), palette="Pastel2", legend=False)
+    # sfig = a.get_figure()
+    # sfig.savefig('C:/GitHub/msiam/visualizations/vis_ep{}_{}-shot_tr_{}_.jpeg'.format(
+    #     episode, n_shot, after_OT), dpi=1000)
+
+    sns.relplot(x=proj_2d[:, 0], y=proj_2d[:, 1], hue=df['class'].astype(
+        int), palette="Dark2", style=df['set'].astype(int), s=df['set']*150+50, legend=False)
+    sns.despine(right=True)
+    plt.savefig('C:/GitHub/msiam/visualizations/r18_{}_ep{}_{}-shot_tr_{}_.jpeg'.format(
+        proj, episode, n_shot, after_OT), dpi=1000)
+
+    return
 
 
 @torch.no_grad()
@@ -102,6 +148,21 @@ def init_distributed_mode(args):
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])
         args.gpu = int(os.environ['LOCAL_RANK'])
+
+        ############### TO REMOVE #################
+
+        # use gloo backend for local runs on windows
+        dist.init_process_group(
+            backend="gloo",
+            world_size=args.world_size,
+            rank=args.rank,
+        )
+        torch.cuda.set_device(args.gpu)
+        print('| distributed init (rank {}): {}'.format(
+            args.rank, args.dist_url), flush=True)
+        dist.barrier()
+        return
+        ############### TO REMOVE #################
 
     # launched with submitit on a slurm cluster
     elif 'SLURM_PROCID' in os.environ:
@@ -281,6 +342,42 @@ def build_student_teacher(args):
 
     print(student)
     return student, teacher
+
+
+def build_cub_fewshot_loader(args, n_shot=5, download=False, mode='test'):
+    """ Generates tasks from the specified Dataset
+    Arguments:- 
+      root: root folder of Omniglot dataset
+      image_transforms: transforms to be applied to images before loading in the dataloader
+      target_transforms: transforms to be applied to target classes before loading in the dataloader
+      task_transforms: specify n_ways, k_shots, q_queries, num_tasks to create and classes to sample 
+                    tasks from (if Omniglot) or mode: train/valid/test split to load (if MiniImageNet)
+                    or mode: train/validation/test split to load (if CIFARFS)"""
+
+    image_transforms = transforms.Compose(
+        [transforms.ToTensor(), transforms.Resize([224, 224])])
+    n_ways = args.n_way
+    k_shots = n_shot
+    q_shots = args.n_query
+    num_tasks = args.n_test_task
+    root = args.data_path
+
+    tiered = CUBirds200(root, mode, transform=image_transforms,
+                        target_transform=None, download=download)
+    dataset = l2l.data.MetaDataset(tiered)
+
+    trans = [
+        l2l.data.transforms.FusedNWaysKShots(dataset,
+                                             n=n_ways,
+                                             k=k_shots + q_shots),
+        l2l.data.transforms.LoadData(dataset),
+        l2l.data.transforms.RemapLabels(dataset),
+        l2l.data.transforms.ConsecutiveLabels(dataset)
+    ]
+    tasks = l2l.data.TaskDataset(
+        dataset, task_transforms=trans, num_tasks=num_tasks)
+
+    return tasks
 
 
 def build_fewshot_loader(args, mode='test'):
