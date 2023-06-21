@@ -33,16 +33,23 @@ from umap import UMAP  # noqa
 
 
 @torch.no_grad()
-def visualize_optimal_transport(z_support, z_query, y_support, y_query, proj, episode, n_shot, after_OT):
-    df_sup = pd.DataFrame(z_support)
-    df_sup['class'] = pd.Series(y_support)
-    df_sup['set'] = pd.Series(np.ones(len(df_sup.index)))
+def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_query,
+                                y_support, y_query, proj, episode, n_shot,
+                                n_way=5, n_query=15):
+    df_sup_before = pd.DataFrame(orginal_prototypes)
+    df_sup_before['class'] = pd.Series(y_support)
+    df_sup_before['set'] = pd.Series(np.ones(len(df_sup_before.index)))
+
+    df_sup_after = pd.DataFrame(transported_prototypes)
+    df_sup_after['class'] = pd.Series(y_support)
+    df_sup_after['set'] = pd.Series(np.ones(len(df_sup_after.index)))
 
     df_quer = pd.DataFrame(z_query)
     df_quer['class'] = pd.Series(y_query)
     df_quer['set'] = pd.Series(np.zeros(len(df_quer.index)))
 
-    df = pd.concat([df_sup, df_quer])
+    df = pd.concat([df_sup_before, df_quer, df_sup_after])
+    df = df.reset_index(drop=True)
     features = df.iloc[:, :-2]
 
     if proj == "tsne":
@@ -52,22 +59,41 @@ def visualize_optimal_transport(z_support, z_query, y_support, y_query, proj, ep
         umap = UMAP(n_components=2, init='random', random_state=0)
         proj_2d = umap.fit_transform(features)
 
-    print("DBS score: {}".format(davies_bouldin_score(proj_2d, df['set'])))
+    proj_2d_before = proj_2d[:-n_way, :]
+    proj_2d_after = proj_2d[n_way:, :]
 
-    # plt.figure(figsize=(25, 12))
-    # sns.relplot(x=proj_2d[:, 0], y=proj_2d[:, 1], hue=df['class'].astype(
-    #     int), palette="Dark2", style=df['set'].astype(int), s=df['set']*150+50, legend=False)
-    # a = sns.kdeplot(x=proj_2d[:, 0], y=proj_2d[:, 1],
-    #                 hue=df['class'].astype(int), palette="Pastel2", legend=False)
+    print("Set DBS score before: {}".format(
+        davies_bouldin_score(proj_2d_before, df['set'][:-n_way])))
+    print("Set DBS score after: {}".format(
+        davies_bouldin_score(proj_2d_after, df['set'][n_way:])))
+
+    # sns.relplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1], hue=df['class'][:-n_way].astype(
+    #     int), palette="Dark2", style=df['set'][:-n_way].astype(int), s=df['set'][:-n_way]*150+50, legend=False)
+    # a = sns.kdeplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1],
+    #                 hue=df['class'][:-n_way].astype(int), palette="Pastel2", legend=False)
     # sfig = a.get_figure()
-    # sfig.savefig('C:/GitHub/msiam/visualizations/vis_ep{}_{}-shot_tr_{}_.jpeg'.format(
-    #     episode, n_shot, after_OT), dpi=1000)
+    # sfig.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_before.jpeg'.format(
+    #     proj, episode, n_shot), dpi=1000)
 
-    sns.relplot(x=proj_2d[:, 0], y=proj_2d[:, 1], hue=df['class'].astype(
-        int), palette="Dark2", style=df['set'].astype(int), s=df['set']*150+50, legend=False)
+    # sns.relplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1], hue=df['class'][n_way:].astype(
+    #     int), palette="Dark2", style=df['set'][n_way:].astype(int), s=df['set'][n_way:]*150+50, legend=False)
+    # b = sns.kdeplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1],
+    #                 hue=df['class'][n_way:].astype(int), palette="Pastel2", legend=False)
+    # sfig = b.get_figure()
+    # sfig.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_after.jpeg'.format(
+    #     proj, episode, n_shot), dpi=1000)
+
+    sns.relplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1], hue=df['class'][:-n_way].astype(
+        int), palette="Dark2", style=df['set'][:-n_way].astype(int), s=df['set'][:-n_way]*150+50, legend=False)
     sns.despine(right=True)
-    plt.savefig('C:/GitHub/msiam/visualizations/r18_{}_ep{}_{}-shot_tr_{}_.jpeg'.format(
-        proj, episode, n_shot, after_OT), dpi=1000)
+    plt.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_before.jpeg'.format(
+        proj, episode, n_shot), dpi=1000)
+
+    sns.relplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1], hue=df['class'][n_way:].astype(
+        int), palette="Dark2", style=df['set'][n_way:].astype(int), s=df['set'][n_way:]*150+50, legend=False)
+    sns.despine(right=True)
+    plt.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_after.jpeg'.format(
+        proj, episode, n_shot), dpi=1000)
 
     return
 
