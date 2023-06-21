@@ -15,7 +15,7 @@ from sklearn.svm import LinearSVC
 from tqdm import tqdm
 from pathlib import Path
 import torch.backends.cudnn as cudnn
-from utils import fix_random_seeds, init_distributed_mode
+from utils import fix_random_seeds, init_distributed_mode, visualize_optimal_transport, build_cub_fewshot_loader
 
 from optimal_transport import OptimalTransport
 from cdfsl_benchmark.datasets import (ISIC_few_shot, CropDisease_few_shot,
@@ -34,7 +34,7 @@ def args_parser():
     parser.add_argument('--eval_path', type=str,
                         default=None, help='path to tested model')
     parser.add_argument('--dataset', type=str, default='miniImageNet',
-                        choices=['tieredImageNet', 'miniImageNet', 'cdfsl'], help='dataset')
+                        choices=['tieredImageNet', 'miniImageNet', 'cdfsl', 'cub'], help='dataset')
     parser.add_argument('--num_workers', type=int,
                         default=1, help='num of workers to use')
     parser.add_argument('--use_feature_align', default=False, type=bool_flag,
@@ -159,8 +159,6 @@ def finetune_fewshot(
 
     original_encoder_state = copy.deepcopy(encoder.state_dict())
 
-    # AAAAAAAAAAAAAAAAAA
-    # n_shot = 5
     for idx, (episode, _) in enumerate(tqdm(loader)):
         if episode.dim() > 4:
             if idx == 0:
@@ -169,41 +167,20 @@ def finetune_fewshot(
         if idx == 0:
             print("Episode Size for eval: {}".format(episode.size()))
 
-        # acc = supervised_finetuning_test(encoder,
-        #                                  episode=episode,
-        #                                  inner_lr=args.sup_finetune_lr,
-        #                                  total_epochs=args.sup_finetune_epochs,
-        #                                  freeze_backbone=args.ft_freeze_backbone,
-        #                                  finetune_batch_norm=args.finetune_batch_norm,
-        #                                  device=torch.device('cuda'),
-        #                                  n_way=args.n_way,
-        #                                  n_query=n_query,
-        #                                  n_shot=n_shot,
-        #                                  max_n_shot=max(n_shots),
-        #                                  use_ot=args.ft_use_ot,
-        #                                  use_prototypes_in_tuning=args.use_prototypes_in_tuning)
-
-        # encoder.load_state_dict(original_encoder_state)
-        # accs[f'{n_shot}-shot'].append(acc)
-
-    # acc = np.array(accs[f'{n_shot}-shot'])
-    # mean = acc.mean()
-    # print('Mean Accuracy {}'.format(mean*100))
-
         for n_shot in n_shots:
-            acc = supervised_finetuning_test(encoder,
-                                             episode=episode,
-                                             inner_lr=args.sup_finetune_lr,
-                                             total_epochs=args.sup_finetune_epochs,
-                                             freeze_backbone=args.ft_freeze_backbone,
-                                             finetune_batch_norm=args.finetune_batch_norm,
-                                             device=torch.device('cuda'),
-                                             n_way=args.n_way,
-                                             n_query=n_query,
-                                             n_shot=n_shot,
-                                             max_n_shot=max(n_shots),
-                                             use_ot=args.ft_use_ot,
-                                             use_prototypes_in_tuning=args.use_prototypes_in_tuning)
+            acc = supervised_finetuning(encoder,
+                                        episode=episode,
+                                        inner_lr=args.sup_finetune_lr,
+                                        total_epochs=args.sup_finetune_epochs,
+                                        freeze_backbone=args.ft_freeze_backbone,
+                                        finetune_batch_norm=args.finetune_batch_norm,
+                                        device=torch.device('cuda'),
+                                        n_way=args.n_way,
+                                        n_query=n_query,
+                                        n_shot=n_shot,
+                                        max_n_shot=max(n_shots),
+                                        use_ot=args.ft_use_ot,
+                                        use_prototypes_in_tuning=args.use_prototypes_in_tuning)
 
             encoder.load_state_dict(original_encoder_state)
             accs[f'{n_shot}-shot'].append(acc)
@@ -227,7 +204,7 @@ def finetune_fewshot(
 
 @torch.no_grad()
 def evaluate_fewshot(
-        encoder, use_transformers, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', power_norm=False, feature_extractor=None):
+        encoder, use_transformers, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', power_norm=False, feature_extractor=None, vis=False):
 
     encoder.eval()
     accs = {}
@@ -327,6 +304,7 @@ def evaluate_fewshot(
         # -- Fit Logistic Regression Classifier
         for tb in range(test_batch_size):
             for n_shot in n_shots:
+
                 # (n_way * n_shot) x D
                 cur_sup_f = sup_f[tb, :, :n_shot, :].reshape(
                     n_way*n_shot, -1).detach().cpu().numpy()
@@ -336,16 +314,14 @@ def evaluate_fewshot(
                 cur_qry_f = qry_f[tb]
                 cur_qry_y = qry_label
 
-                prototypes = groupedAvg(cur_sup_f, n_shot)
+                prototypes_before = groupedAvg(cur_sup_f, n_shot)
 
                 ##################
                 transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
                                                          stopping_criterion=1e-4)
 
-                # cur_sup_f, cur_qry_f = transportation_module(
-                #     torch.from_numpy(cur_sup_f), torch.from_numpy(cur_qry_f))
                 prototypes, cur_qry_f = transportation_module(
-                    torch.from_numpy(prototypes), torch.from_numpy(cur_qry_f))
+                    torch.from_numpy(prototypes_before), torch.from_numpy(cur_qry_f))
 
                 prototypes = prototypes.detach().cpu().numpy()
                 cur_qry_f = cur_qry_f.detach().cpu().numpy()
@@ -377,6 +353,17 @@ def evaluate_fewshot(
                 acc = metrics.accuracy_score(cur_qry_y, cur_qry_pred)
                 acc_ot = metrics.accuracy_score(cur_qry_y, cur_qry_pred_ot)
 
+                if vis:
+                    visualize_optimal_transport(prototypes_before, prototypes, cur_qry_f,
+                                                cur_sup_y[::n_shot], cur_qry_y, "umap", idx+1, n_shot, n_way=n_way, n_query=n_query)
+
+                # if acc_ot - acc > 0.2:
+                #     print("---- Episode: {} {}-shot -------".format(idx+1, n_shot))
+                #     print("Accuracy Before OT: {}".format(acc))
+                #     print("Accuracy After OT: {}".format(acc_ot))
+                #     visualize_optimal_transport(orginal_prototypes=prototypes_before, transported_prototypes=prototypes, z_query=cur_qry_f,
+                #                                 y_support=cur_sup_y[::n_shot], y_query=cur_qry_y, proj="umap", episode=idx+1, n_shot=n_shot, n_way=n_way, n_query=n_query)
+                #     print("\n")
                 accs[f'{n_shot}-shot'].append(acc)
                 accs_ot[f'{n_shot}-shot'].append(acc_ot)
 
@@ -418,8 +405,6 @@ def evaluate_imagenet(args):
     student, teacher = build_student_teacher(args)
 
     if args.eval_path is not None:
-        # student, teacher = load_student_teacher(
-        #     student, teacher, args.eval_path, eval=True)
 
         student.load_state_dict(torch.load(args.eval_path)
                                 ['student'], strict=True)
@@ -448,6 +433,48 @@ def evaluate_imagenet(args):
         return
 
 
+def evaluate_cub(args):
+    print("\n".join("%s: %s" % (k, str(v))
+          for k, v in sorted(dict(vars(args)).items())))
+    cudnn.benchmark = True
+
+    if args.fine_tune:
+        args.test_batch_size = 1
+
+    test_loader = build_cub_fewshot_loader(
+        args, n_shot=20, download=False, mode='test')
+
+    student, teacher = build_student_teacher(args)
+
+    if args.eval_path is not None:
+
+        student.load_state_dict(torch.load(args.eval_path)
+                                ['student'], strict=True)
+        teacher.load_state_dict(torch.load(args.eval_path)
+                                ['teacher'], strict=True)
+
+        if "deit" in args.backbone:
+            student.module.encoder.masked_im_modeling = False
+
+        if args.use_student:
+            model = student
+        else:
+            model = teacher
+
+        feature_extractor = model.module.feature_extractor if "feature_extractor" in model.named_buffers() else None
+
+        if args.fine_tune:
+            finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[5, 20],
+                             n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+        else:
+            evaluate_fewshot(model.module.encoder, model.module.use_transformers, test_loader, n_way=args.n_way, n_shots=[
+                5, 20], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+
+            if "deit" in args.backbone:
+                student.module.encoder.masked_im_modeling = True
+        return
+
+
 def evaluate_cdfsl(args):
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
@@ -462,44 +489,39 @@ def evaluate_cdfsl(args):
     print("Loading {}".format(loader_name))
     datamgr = Chest_few_shot.SetDataManager(Path(args.data_path) / Path("chestX"),
                                             args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
-    test_loader = datamgr.get_data_loader(aug=False)
+    chest_loader = datamgr.get_data_loader(aug=False)
 
-    test_loaders.append((loader_name, test_loader))
+    test_loaders.append((loader_name, chest_loader))
 
     loader_name = "ISIC"
     print("Loading {}".format(loader_name))
     datamgr = ISIC_few_shot.SetDataManager(Path(args.data_path) / Path("ISIC"),
                                            args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
-    test_loader = datamgr.get_data_loader(aug=False)
+    isic_loader = datamgr.get_data_loader(aug=False)
 
-    test_loaders.append((loader_name, test_loader))
+    test_loaders.append((loader_name, isic_loader))
 
     loader_name = "EuroSAT"
     print("Loading {}".format(loader_name))
     datamgr = EuroSAT_few_shot.SetDataManager(Path(args.data_path) / Path("EuroSAT/2750"),
                                               args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
-    test_loader = datamgr.get_data_loader(aug=False)
+    eurosat_loader = datamgr.get_data_loader(aug=False)
 
-    test_loaders.append((loader_name, test_loader))
+    test_loaders.append((loader_name, eurosat_loader))
 
     loader_name = "CropDisease"
     print("Loading {}".format(loader_name))
     datamgr = CropDisease_few_shot.SetDataManager(Path(args.data_path) / Path("plant-disease"),
                                                   args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
-    test_loader = datamgr.get_data_loader(aug=False)
+    cropdis_loader = datamgr.get_data_loader(aug=False)
 
-    test_loaders.append((loader_name, test_loader))
-
-    # for idx, (loader_name, test_loader) in enumerate(test_loaders):
-    #     print(len(test_loader))
+    test_loaders.append((loader_name, cropdis_loader))
 
     ####################################################
 
     student, teacher = build_student_teacher(args)
 
     if args.eval_path is not None:
-        # student, teacher = load_student_teacher(
-        #     student, teacher, args.eval_path, eval=True)
 
         student.load_state_dict(torch.load(args.eval_path)
                                 ['student'], strict=True)
@@ -545,5 +567,7 @@ if __name__ == '__main__':
 
     if args.dataset == "tieredImageNet" or args.dataset == "miniImageNet":
         evaluate_imagenet(args)
+    elif args.dataset == "cub":
+        evaluate_cub(args)
     else:
         evaluate_cdfsl(args)
