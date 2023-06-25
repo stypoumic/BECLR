@@ -136,6 +136,9 @@ def args_parser():
     parser.add_argument('--use_prototypes_in_tuning', default=False, type=bool_flag,
                         help='Whether to use prototypes during finetuning or just for initialization.')
 
+    parser.add_argument('--cd_fsl', type=str, default='all',
+                        choices=['all', 'chestx', 'isic', 'eurosat', 'crop'], help='dataset')
+
     return parser
 
 
@@ -485,37 +488,41 @@ def evaluate_cdfsl(args):
     dataset_names = ["ISIC", "EuroSAT", "CropDisease", "ChestX"]
     test_loaders = []
 
-    loader_name = "ChestX"
-    print("Loading {}".format(loader_name))
-    datamgr = Chest_few_shot.SetDataManager(Path(args.data_path) / Path("chestX"),
-                                            args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
-    chest_loader = datamgr.get_data_loader(aug=False)
+    if args.cd_fsl == "all" or args.cd_fsl == "chestx":
+        loader_name = "ChestX"
+        print("Loading {}".format(loader_name))
+        datamgr = Chest_few_shot.SetDataManager(Path(args.data_path) / Path("chestX"),
+                                                args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+        chest_loader = datamgr.get_data_loader(aug=False)
 
-    test_loaders.append((loader_name, chest_loader))
+        test_loaders.append((loader_name, chest_loader))
 
-    loader_name = "ISIC"
-    print("Loading {}".format(loader_name))
-    datamgr = ISIC_few_shot.SetDataManager(Path(args.data_path) / Path("ISIC"),
-                                           args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
-    isic_loader = datamgr.get_data_loader(aug=False)
+    if args.cd_fsl == "all" or args.cd_fsl == "isic":
+        loader_name = "ISIC"
+        print("Loading {}".format(loader_name))
+        datamgr = ISIC_few_shot.SetDataManager(Path(args.data_path) / Path("ISIC"),
+                                               args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+        isic_loader = datamgr.get_data_loader(aug=False)
 
-    test_loaders.append((loader_name, isic_loader))
+        test_loaders.append((loader_name, isic_loader))
 
-    loader_name = "EuroSAT"
-    print("Loading {}".format(loader_name))
-    datamgr = EuroSAT_few_shot.SetDataManager(Path(args.data_path) / Path("EuroSAT/2750"),
-                                              args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
-    eurosat_loader = datamgr.get_data_loader(aug=False)
-
-    test_loaders.append((loader_name, eurosat_loader))
-
-    loader_name = "CropDisease"
-    print("Loading {}".format(loader_name))
-    datamgr = CropDisease_few_shot.SetDataManager(Path(args.data_path) / Path("plant-disease"),
+    if args.cd_fsl == "all" or args.cd_fsl == "eurosat":
+        loader_name = "EuroSAT"
+        print("Loading {}".format(loader_name))
+        datamgr = EuroSAT_few_shot.SetDataManager(Path(args.data_path) / Path("EuroSAT/2750"),
                                                   args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
-    cropdis_loader = datamgr.get_data_loader(aug=False)
+        eurosat_loader = datamgr.get_data_loader(aug=False)
 
-    test_loaders.append((loader_name, cropdis_loader))
+        test_loaders.append((loader_name, eurosat_loader))
+
+    if args.cd_fsl == "all" or args.cd_fsl == "crop":
+        loader_name = "CropDisease"
+        print("Loading {}".format(loader_name))
+        datamgr = CropDisease_few_shot.SetDataManager(Path(args.data_path) / Path("plant-disease"),
+                                                      args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+        cropdis_loader = datamgr.get_data_loader(aug=False)
+
+        test_loaders.append((loader_name, cropdis_loader))
 
     ####################################################
 

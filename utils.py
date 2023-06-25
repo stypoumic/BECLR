@@ -388,9 +388,9 @@ def build_cub_fewshot_loader(args, n_shot=5, download=False, mode='test'):
     num_tasks = args.n_test_task
     root = args.data_path
 
-    tiered = CUBirds200(root, mode, transform=image_transforms,
-                        target_transform=None, download=download)
-    dataset = l2l.data.MetaDataset(tiered)
+    cub = CUBirds200(root, mode, transform=image_transforms,
+                     target_transform=None, download=download)
+    dataset = l2l.data.MetaDataset(cub)
 
     trans = [
         l2l.data.transforms.FusedNWaysKShots(dataset,
