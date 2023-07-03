@@ -1,6 +1,7 @@
 import torch
 from torch import distributed as dist
 from torch import nn
+import numpy as np
 
 
 # Adapted from https://github.com/dfdazac/wassdistance
@@ -117,3 +118,43 @@ class Sinkhorn(nn.Module):
     def ave(u, u1, tau):
         "Barycenter subroutine, used by kinetic acceleration through extrapolation."
         return tau * u + (1 - tau) * u1
+
+
+@torch.no_grad()
+def distributed_sinkhorn(input, epsilon, iterations):
+    # ensure that input has not infinite values
+    np_input = input.cpu().numpy()
+    input[input == float("Inf")] = np.nanmax(np_input[np_input != np.inf]) + 10
+
+    # in case really high values are present in the input, gradually relax the
+    # OT problem, by increasing epsilon (In practice: a value of 0.05 should be
+    # enough to exit this loop)
+    while True:
+        # Q is K-by-B
+        Q = torch.exp(input / epsilon).t()
+        B = Q.shape[1]   # number of samples to assign
+        K = Q.shape[0]  # how many prototypes
+
+        # make the matrix sums to 1
+        sum_Q = torch.sum(Q)
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(sum_Q)
+        Q /= sum_Q
+
+        if not torch.isnan(Q).any():
+            break
+        epsilon += 0.1
+
+    for it in range(iterations):
+        # normalize each row: total weight per prototype must be 1/K
+        sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(sum_of_rows)
+        Q /= sum_of_rows
+        Q /= K
+
+        # normalize each column: total weight per sample must be 1/B
+        Q /= torch.sum(Q, dim=0, keepdim=True)
+        Q /= B
+    Q *= B  # the colomns must sum to 1 so that Q is an assignment
+    return Q.t()
