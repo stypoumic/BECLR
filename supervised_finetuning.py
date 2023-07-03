@@ -1,19 +1,21 @@
 """Adapted from https://github.com/IBM/cdfsl-benchmark/blob/master/finetune.py"""
 
-from tqdm import tqdm
+import glob
+import os
+import time
+from itertools import combinations
+
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
-import torch.optim
 import torch.nn.functional as F
+import torch.optim
 import torch.optim.lr_scheduler as lr_scheduler
-import time
 from sklearn import metrics
-import os
-import glob
-from itertools import combinations
+from torch.autograd import Variable
 from torchvision.transforms.functional import normalize
+from tqdm import tqdm
+
 from optimal_transport import OptimalTransport
 
 
