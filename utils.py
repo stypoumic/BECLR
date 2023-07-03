@@ -1,171 +1,21 @@
-import pickle
-import math
-import numpy as np
-import torch
 import argparse
-import torch.optim as optim
-import torch.distributed as dist
-from torchvision import transforms
-import learn2learn as l2l
-from pathlib import Path
-import copy
 import os
 import sys
+from pathlib import Path
+
+import learn2learn as l2l
+import numpy as np
+import torch
+import torch.distributed as dist
 from torch import nn
+from torchvision import transforms
 
-from dataset.miniImageNet import miniImageNet
-from dataset.tieredImageNet import tieredImageNet
 from dataset.cub import CUBirds200
+from dataset.miniImageNet import miniImageNet
 from dataset.sampler import EpisodeSampler
-
+from dataset.tieredImageNet import tieredImageNet
+from models import resnet10, resnet18, resnet34, resnet50
 from models.msiam import MSiam
-from models import resnet10, resnet18, resnet34, resnet50, vit_tiny
-
-from sklearn.manifold import TSNE
-from matplotlib import cm
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-from sklearn.metrics import davies_bouldin_score
-import warnings
-warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")
-from umap import UMAP  # noqa
-
-
-@torch.no_grad()
-def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_query,
-                                y_support, y_query, proj, episode, n_shot,
-                                n_way=5, n_query=15):
-    df_sup_before = pd.DataFrame(orginal_prototypes)
-    df_sup_before['class'] = pd.Series(y_support)
-    df_sup_before['set'] = pd.Series(np.ones(len(df_sup_before.index)))
-
-    df_sup_after = pd.DataFrame(transported_prototypes)
-    df_sup_after['class'] = pd.Series(y_support)
-    df_sup_after['set'] = pd.Series(np.ones(len(df_sup_after.index)))
-
-    df_quer = pd.DataFrame(z_query)
-    df_quer['class'] = pd.Series(y_query)
-    df_quer['set'] = pd.Series(np.zeros(len(df_quer.index)))
-
-    df = pd.concat([df_sup_before, df_quer, df_sup_after])
-    df = df.reset_index(drop=True)
-    features = df.iloc[:, :-2]
-
-    if proj == "tsne":
-        tsne = TSNE(n_components=2, verbose=0)
-        proj_2d = tsne.fit_transform(features)
-    else:
-        umap = UMAP(n_components=2, init='random', random_state=0)
-        proj_2d = umap.fit_transform(features)
-
-    proj_2d_before = proj_2d[:-n_way, :]
-    proj_2d_after = proj_2d[n_way:, :]
-
-    print("Set DBS score before: {}".format(
-        davies_bouldin_score(proj_2d_before, df['set'][:-n_way])))
-    print("Set DBS score after: {}".format(
-        davies_bouldin_score(proj_2d_after, df['set'][n_way:])))
-
-    # sns.relplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1], hue=df['class'][:-n_way].astype(
-    #     int), palette="Dark2", style=df['set'][:-n_way].astype(int), s=df['set'][:-n_way]*150+50, legend=False)
-    # a = sns.kdeplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1],
-    #                 hue=df['class'][:-n_way].astype(int), palette="Pastel2", legend=False)
-    # sfig = a.get_figure()
-    # sfig.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_before.jpeg'.format(
-    #     proj, episode, n_shot), dpi=1000)
-
-    # sns.relplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1], hue=df['class'][n_way:].astype(
-    #     int), palette="Dark2", style=df['set'][n_way:].astype(int), s=df['set'][n_way:]*150+50, legend=False)
-    # b = sns.kdeplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1],
-    #                 hue=df['class'][n_way:].astype(int), palette="Pastel2", legend=False)
-    # sfig = b.get_figure()
-    # sfig.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_after.jpeg'.format(
-    #     proj, episode, n_shot), dpi=1000)
-
-    sns.relplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1], hue=df['class'][:-n_way].astype(
-        int), palette="Dark2", style=df['set'][:-n_way].astype(int), s=df['set'][:-n_way]*150+50, legend=False)
-    sns.despine(right=True)
-    plt.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_before.jpeg'.format(
-        proj, episode, n_shot), dpi=1000)
-
-    sns.relplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1], hue=df['class'][n_way:].astype(
-        int), palette="Dark2", style=df['set'][n_way:].astype(int), s=df['set'][n_way:]*150+50, legend=False)
-    sns.despine(right=True)
-    plt.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_after.jpeg'.format(
-        proj, episode, n_shot), dpi=1000)
-
-    return
-
-
-@torch.no_grad()
-def visualize_memory_embeddings(memory: torch.Tensor, labels: torch.Tensor,
-                                num_clusters: int, save_path: str,
-                                epoch: int, origin: str):
-    # ----------------- 3D tSNE------------------------------
-    tsne = TSNE(n_components=3, verbose=1)
-    tsne_proj = tsne.fit_transform(memory)
-
-    cmap = cm.get_cmap('gist_rainbow')
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-
-    # only plot the first 25 clusters
-    num_clusters = 25
-    ax.set_prop_cycle(color=[cmap(1.*i/num_clusters)
-                      for i in range(num_clusters)])
-
-    for lab in range(num_clusters):
-        indices = labels == lab
-        indices = np.random.permutation(indices)
-        # only plot 5 samples/class
-        if len(indices < 5):
-            ax.scatter(tsne_proj[indices, 0],
-                       tsne_proj[indices, 1],
-                       tsne_proj[indices, 2],
-                       label=lab,
-                       alpha=0.75)
-        else:
-            ax.scatter(tsne_proj[indices[0:5], 0],
-                       tsne_proj[indices[0:5], 1],
-                       tsne_proj[indices[0:5], 2],
-                       label=lab,
-                       alpha=0.75)
-    # plt.show()
-    save_path = Path(save_path) / Path(origin)
-    save_path.mkdir(parents=True, exist_ok=True)
-    # save 3d interactive graph
-    pickle.dump(fig, open(save_path / Path("E_"+str(epoch)+".pickle"), 'wb'))
-
-   # ----------------- 2D tSNE------------------------------
-    tsne = TSNE(n_components=2, verbose=1)
-    tsne_proj = tsne.fit_transform(memory)
-
-    cmap = cm.get_cmap('gist_rainbow')
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-
-    # only plot the first 25 clusters
-    num_clusters = 25
-    ax.set_prop_cycle(color=[cmap(1.*i/num_clusters)
-                      for i in range(num_clusters)])
-
-    for lab in range(num_clusters):
-        indices = labels == lab
-        indices = np.random.permutation(indices)
-        # only plot 5 samples/class
-        if len(indices < 5):
-            ax.scatter(tsne_proj[indices, 0],
-                       tsne_proj[indices, 1],
-                       label=lab,
-                       alpha=0.75)
-        else:
-            ax.scatter(tsne_proj[indices[0:5], 0],
-                       tsne_proj[indices[0:5], 1],
-                       label=lab,
-                       alpha=0.75)
-    # save 2d graph
-    plt.savefig(save_path / Path("E_"+str(epoch)+".png"))
 
 
 def init_distributed_mode(args):
@@ -271,15 +121,6 @@ def accuracy(output, target, topk=(1,)):
         return res
 
 
-def has_batchnorms(model):
-    bn_types = (nn.BatchNorm1d, nn.BatchNorm2d,
-                nn.BatchNorm3d, nn.SyncBatchNorm)
-    for name, module in model.named_modules():
-        if isinstance(module, bn_types):
-            return True
-    return False
-
-
 def fix_random_seeds(seed=31):
     """
     Fix random seeds.
@@ -289,57 +130,18 @@ def fix_random_seeds(seed=31):
     np.random.seed(seed)
 
 
-def load_distil_model(args):
-    use_transformers = True if 'deit' in args.backbone else False
-
-    checkpoint = torch.load(args.teacher_path)
-
-    model_encoder = resnet50()
-    embed_dim = model_encoder.out_dim
-    args.dist = False
-    model = MSiam(encoder=model_encoder, dim_in=embed_dim, args=args,
-                  use_transformers=use_transformers, is_teacher=True)
-    args.dist = True
-
-    model = model.cuda()
-    model = nn.parallel.DistributedDataParallel(model,
-                                                device_ids=[args.gpu])
-    # model = torch.nn.DataParallel(model)
-
-    msg = model.load_state_dict(checkpoint['student'])
-    print(f'load teacher model from: {args.teacher_path}, {msg}')
-    model.eval()
-    return model
-
-
 def build_student_teacher(args):
     model_dict = {'resnet10': resnet10, 'resnet18': resnet18,
-                  'resnet34': resnet34, 'resnet50': resnet50,
-                  'deit_tiny': vit_tiny}
+                  'resnet34': resnet34, 'resnet50': resnet50}
 
-    use_transformers = True if 'deit' in args.backbone else False
+    student_encoder = model_dict[args.backbone]()
+    teacher_encoder = model_dict[args.backbone]()
+    embed_dim = student_encoder.out_dim
 
-    if use_transformers:
-        student_encoder = model_dict[args.backbone](
-            patch_size=args.patch_size,
-            drop_path_rate=args.drop_path,
-            return_all_tokens=True,
-            masked_im_modeling=args.use_masked_im_modeling,
-        )
-        teacher_encoder = model_dict[args.backbone](
-            patch_size=args.patch_size,
-            return_all_tokens=True,
-        )
-        embed_dim = student_encoder.embed_dim
-    else:
-        student_encoder = model_dict[args.backbone]()
-        teacher_encoder = model_dict[args.backbone]()
-        embed_dim = student_encoder.out_dim
-
-    student = MSiam(encoder=student_encoder, dim_in=embed_dim, args=args,
-                    use_transformers=use_transformers, is_teacher=False)
-    teacher = MSiam(encoder=teacher_encoder, dim_in=embed_dim, args=args,
-                    use_transformers=use_transformers, is_teacher=True)
+    student = MSiam(encoder=student_encoder, dim_in=embed_dim,
+                    args=args, is_teacher=False)
+    teacher = MSiam(encoder=teacher_encoder, dim_in=embed_dim,
+                    args=args, is_teacher=True)
 
     # move networks to gpu
     student, teacher = student.cuda(), teacher.cuda()
@@ -462,17 +264,6 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
     return schedule
 
 
-def adjust_learning_rate(args, optimizer, cur_iter, total_iter):
-    lr = args.lr
-    eta_min = lr * 1e-3
-    lr = eta_min + (lr - eta_min) * \
-        (1 + math.cos(math.pi * cur_iter / total_iter)) / 2
-
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-    return lr
-
-
 def is_dist_avail_and_initialized():
     if not dist.is_available():
         return False
@@ -525,20 +316,6 @@ def bool_flag(s):
         raise argparse.ArgumentTypeError("invalid value for a boolean flag")
 
 
-def save_model(model, epoch, loss, optimizer, batch_size, save_file, fp16_scaler=None):
-    print('==> Saving... \n')
-    save_state = {
-        'model': model.state_dict(),
-        'epoch': epoch,
-        'loss': loss,
-        'optimizer': optimizer.state_dict(),
-        'batch_size': batch_size,
-        'fp16_scaler': fp16_scaler
-    }
-    torch.save(save_state, save_file)
-    del save_state
-
-
 def save_student_teacher(args, student, teacher, epoch, loss, optimizer, batch_size,
                          save_file, teacher_memory, student_memory,
                          student_proj_memory, fp16_scaler=None):
@@ -546,9 +323,13 @@ def save_student_teacher(args, student, teacher, epoch, loss, optimizer, batch_s
     if args.use_single_memory:
         teacher_bank = student_proj_memory.bank
         teacher_ptr = student_proj_memory.bank_ptr
+        teacher_labels = student_proj_memory.labels
+        teacher_centers = student_proj_memory.centers
     else:
         teacher_bank = teacher_memory.bank
         teacher_ptr = teacher_memory.bank_ptr
+        teacher_labels = teacher_memory.labels
+        teacher_centers = teacher_memory.centers
     save_state = {
         'student': student.state_dict(),
         'teacher': teacher.state_dict(),
@@ -557,9 +338,9 @@ def save_student_teacher(args, student, teacher, epoch, loss, optimizer, batch_s
         'optimizer': optimizer.state_dict(),
         'batch_size': batch_size,
         'fp16_scaler': fp16_scaler,
-        'teacher_memory': (teacher_bank, teacher_ptr),
-        'student_memory': (student_memory.bank, student_memory.bank_ptr),
-        'student_proj_memory': (student_proj_memory.bank, student_proj_memory.bank_ptr)
+        'teacher_memory': (teacher_bank, teacher_ptr, teacher_labels, teacher_centers),
+        'student_memory': (student_memory.bank, student_memory.bank_ptr, student_memory.labels, student_memory.centers),
+        'student_proj_memory': (student_proj_memory.bank, student_proj_memory.bank_ptr, student_proj_memory.labels, student_proj_memory.centers)
     }
     torch.save(save_state, save_file)
     del save_state
@@ -607,24 +388,6 @@ class LARS(torch.optim.Optimizer):
                 p.add_(mu, alpha=-g['lr'])
 
 
-def load_model(model, optimizer, fp16_scaler, ckpt_path):
-    print('==> Loading... \n')
-    # open checkpoint file
-    checkpoint = torch.load(ckpt_path)
-
-    epoch = checkpoint['epoch']
-    loss = checkpoint['loss']
-    batch_size = checkpoint['batch_size']
-
-    model.load_state_dict(checkpoint['model'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    if fp16_scaler is not None:
-        fp16_scaler.load_state_dict(checkpoint['fp16_scaler'])
-
-    del checkpoint
-    return model, optimizer, fp16_scaler, epoch, loss, batch_size
-
-
 def load_student_teacher(student, teacher, ckpt_path, teacher_memory=None,
                          student_memory=None, student_proj_memory=None,
                          optimizer=None, fp16_scaler=None):
@@ -646,12 +409,9 @@ def load_student_teacher(student, teacher, ckpt_path, teacher_memory=None,
     if fp16_scaler is not None:
         fp16_scaler.load_state_dict(checkpoint['fp16_scaler'])
 
-    teacher_memory.load_memory_bank(
-        checkpoint['teacher_memory'][0], checkpoint['teacher_memory'][1])
-    student_memory.load_memory_bank(
-        checkpoint['student_memory'][0], checkpoint['student_memory'][1])
-    student_proj_memory.load_memory_bank(
-        checkpoint['student_proj_memory'][0], checkpoint['student_proj_memory'][1])
+    teacher_memory.load_memory_bank(checkpoint['teacher_memory'])
+    student_memory.load_memory_bank(checkpoint['student_memory'])
+    student_proj_memory.load_memory_bank(checkpoint['student_proj_memory'])
 
     del checkpoint
     return student, teacher, optimizer, fp16_scaler, epoch, loss, batch_size
@@ -672,18 +432,6 @@ def grad_logger(named_params):
     if stats.first_layer is None or stats.last_layer is None:
         stats.first_layer = stats.last_layer = 0.
     return stats
-
-
-def clip_gradients(model, clip):
-    norms = []
-    for name, p in model.named_parameters():
-        if p.grad is not None:
-            param_norm = p.grad.data.norm(2)
-            norms.append(param_norm.item())
-            clip_coef = clip / (param_norm + 1e-6)
-            if clip_coef < 1:
-                p.grad.data.mul_(clip_coef)
-    return norms
 
 
 def cancel_gradients_last_layer(epoch, model, freeze_last_layer):
