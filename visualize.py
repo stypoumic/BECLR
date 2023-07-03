@@ -16,54 +16,65 @@ warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")
 from umap import UMAP  # noqa
 
 
-def visualize_memory(memory_bank):
-    print("--Unique Labels Counts--: {}-------\n".format(
-        memory_bank.labels.unique(return_counts=True)[-1]))
-    print(int(memory_bank.bank_ptr))
+def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=30, proj="umap", epoch=0):
+    print("==> Visualizing Memory Embeddings...")
+    unique_label_counts = np.array(
+        memory_bank.labels.unique(return_counts=True)[-1].cpu())
+    if len(unique_label_counts) <= 1:
+        print("Error with memory configuration")
+        return
+    print("--Unique Labels Counts--: {}-------\n".format(unique_label_counts))
+
     bank = np.array(memory_bank.bank.T.detach().cpu())
     labels = np.array(memory_bank.labels.detach().cpu())
 
-    print(bank.shape)
-    print(labels.shape)
-    print(labels)
-    exit()
+    df_memory_bank = pd.DataFrame(bank)
+    df_memory_bank['class'] = pd.Series(labels)
 
-    # random classes
-    # indices of these classes
-    # random 5 images per class
-    # get umap projections
-    # plot with or without distributions
+    # all classes
+    unique_labels = np.arange(unique_label_counts.shape[0])
 
-    # alternaive first get projections and then do the indexing
+    # discard classes with fewer than n_samples assgined to them
+    discarded_labels = [idx for idx, val in enumerate(
+        unique_label_counts) if val <= n_samples]
+    discarded_indices = np.argwhere(np.isin(unique_labels, discarded_labels))
+    unique_labels = np.delete(unique_labels, discarded_indices)
 
-    umap = UMAP(n_components=2, init='random', random_state=0)
-    umap_proj = umap.fit_transform(bank)
+    # randomly select n_class classes from the memory
+    unique_labels = np.random.choice(unique_labels, n_class, replace=False)
 
-    cmap = cm.get_cmap('gist_rainbow')
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
+    # keep only samples from selected claasses
+    df_memory_bank = df_memory_bank[df_memory_bank['class'].isin(
+        unique_labels)]
 
-    # only plot the first 25 clusters
-    num_clusters = 25
-    ax.set_prop_cycle(color=[cmap(1.*i/num_clusters)
-                      for i in range(num_clusters)])
+    # keep only n_samples per class for visualization purposes
+    df_memory_bank = df_memory_bank.groupby(
+        'class', group_keys=False).apply(lambda df: df.sample(n_samples))
+    print(df_memory_bank.shape)
 
-    for lab in range(num_clusters):
-        indices = labels == lab
-        indices = np.random.permutation(indices)
-        # only plot 5 samples/class
-        if len(indices < 5):
-            ax.scatter(umap_proj[indices, 0],
-                       umap_proj[indices, 1],
-                       label=lab,
-                       alpha=0.75)
-        else:
-            ax.scatter(umap_proj[indices[0:5], 0],
-                       umap_proj[indices[0:5], 1],
-                       label=lab,
-                       alpha=0.75)
-    # save 2d graph
-    plt.savefig(Path("C:\GitHub\msiam") / Path("memory_vis.png"))
+    if proj == "tsne":
+        tsne = TSNE(n_components=2, verbose=0)
+        proj_2d = tsne.fit_transform(df_memory_bank)
+    else:
+        umap = UMAP(n_components=2, init='random', random_state=0)
+        proj_2d = umap.fit_transform(df_memory_bank)
+
+    print("DBI score: {}".format(
+        davies_bouldin_score(proj_2d, df_memory_bank['class'])))
+
+    ax = sns.relplot(x=proj_2d[:, 0], y=proj_2d[:, 1], hue=df_memory_bank['class'].astype(
+        int), palette="Dark2", style=df_memory_bank['class'].astype(int), s=35, legend=False, facet_kws=dict(despine=False))
+    ax.set(yticklabels=[])
+    ax.tick_params(left=False)
+    ax.set(xticklabels=[])
+    ax.tick_params(bottom=False)
+
+    save_path = Path(save_path) / Path("memory_visualizations") / Path(origin)
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    plt.savefig(save_path / Path("memory_state_" +
+                str(epoch)+".jpeg"), dpi=1000)
+    return
 
 
 @torch.no_grad()
@@ -96,9 +107,9 @@ def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_qu
     proj_2d_before = proj_2d[:-n_way, :]
     proj_2d_after = proj_2d[n_way:, :]
 
-    print("Set DBS score before: {}".format(
+    print("Set DBI score before: {}".format(
         davies_bouldin_score(proj_2d_before, df['set'][:-n_way])))
-    print("Set DBS score after: {}".format(
+    print("Set DBI score after: {}".format(
         davies_bouldin_score(proj_2d_after, df['set'][n_way:])))
 
     # sns.relplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1], hue=df['class'][:-n_way].astype(
@@ -130,73 +141,3 @@ def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_qu
         proj, episode, n_shot), dpi=1000)
 
     return
-
-
-@torch.no_grad()
-def visualize_memory_embeddings(memory: torch.Tensor, labels: torch.Tensor,
-                                num_clusters: int, save_path: str,
-                                epoch: int, origin: str):
-    # ----------------- 3D tSNE------------------------------
-    tsne = TSNE(n_components=3, verbose=1)
-    tsne_proj = tsne.fit_transform(memory)
-
-    cmap = cm.get_cmap('gist_rainbow')
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-
-    # only plot the first 25 clusters
-    num_clusters = 25
-    ax.set_prop_cycle(color=[cmap(1.*i/num_clusters)
-                      for i in range(num_clusters)])
-
-    for lab in range(num_clusters):
-        indices = labels == lab
-        indices = np.random.permutation(indices)
-        # only plot 5 samples/class
-        if len(indices < 5):
-            ax.scatter(tsne_proj[indices, 0],
-                       tsne_proj[indices, 1],
-                       tsne_proj[indices, 2],
-                       label=lab,
-                       alpha=0.75)
-        else:
-            ax.scatter(tsne_proj[indices[0:5], 0],
-                       tsne_proj[indices[0:5], 1],
-                       tsne_proj[indices[0:5], 2],
-                       label=lab,
-                       alpha=0.75)
-    # plt.show()
-    save_path = Path(save_path) / Path(origin)
-    save_path.mkdir(parents=True, exist_ok=True)
-    # save 3d interactive graph
-    pickle.dump(fig, open(save_path / Path("E_"+str(epoch)+".pickle"), 'wb'))
-
-   # ----------------- 2D tSNE------------------------------
-    tsne = TSNE(n_components=2, verbose=1)
-    tsne_proj = tsne.fit_transform(memory)
-
-    cmap = cm.get_cmap('gist_rainbow')
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-
-    # only plot the first 25 clusters
-    num_clusters = 25
-    ax.set_prop_cycle(color=[cmap(1.*i/num_clusters)
-                      for i in range(num_clusters)])
-
-    for lab in range(num_clusters):
-        indices = labels == lab
-        indices = np.random.permutation(indices)
-        # only plot 5 samples/class
-        if len(indices < 5):
-            ax.scatter(tsne_proj[indices, 0],
-                       tsne_proj[indices, 1],
-                       label=lab,
-                       alpha=0.75)
-        else:
-            ax.scatter(tsne_proj[indices[0:5], 0],
-                       tsne_proj[indices[0:5], 1],
-                       label=lab,
-                       alpha=0.75)
-    # save 2d graph
-    plt.savefig(save_path / Path("E_"+str(epoch)+".png"))
