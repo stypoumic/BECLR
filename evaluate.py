@@ -1,79 +1,74 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import argparse
-from torchvision.transforms.functional import normalize
+import copy
+import math
+from pathlib import Path
 
 import numpy as np
-import math
-import copy
-from supervised_finetuning import supervised_finetuning, supervised_finetuning_test
-
+import torch
+import torch.backends.cudnn as cudnn
+import torch.nn as nn
+import torch.nn.functional as F
 from sklearn import metrics, preprocessing
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
+from torchvision.transforms.functional import normalize
 from tqdm import tqdm
-from pathlib import Path
-import torch.backends.cudnn as cudnn
-from utils import fix_random_seeds, init_distributed_mode, visualize_optimal_transport, build_cub_fewshot_loader, load_student_teacher, visualize_memory, get_params_groups
+
+from cdfsl_benchmark.datasets import (Chest_few_shot, CropDisease_few_shot,
+                                      EuroSAT_few_shot, ISIC_few_shot)
 from memory import NNmemoryBankModule
-
 from optimal_transport import OptimalTransport
-from cdfsl_benchmark.datasets import (ISIC_few_shot, CropDisease_few_shot,
-                                      EuroSAT_few_shot, Chest_few_shot)
-
-
-from utils import build_fewshot_loader, bool_flag, build_student_teacher
+from supervised_finetuning import (supervised_finetuning,
+                                   supervised_finetuning_test)
+from utils import (bool_flag, build_cub_fewshot_loader, build_fewshot_loader,
+                   build_student_teacher, fix_random_seeds, get_params_groups,
+                   init_distributed_mode, load_student_teacher)
+from visualize import visualize_memory, visualize_optimal_transport
 
 
 def args_parser():
     parser = argparse.ArgumentParser(
-        'MSiam training arguments', add_help=False)
+        'MSiam evaluation arguments', add_help=False)
 
     parser.add_argument('--data_path', type=str,
-                        default=None, help='path to dataset')
+                        default=None, help='path to dataset root')
     parser.add_argument('--eval_path', type=str,
                         default=None, help='path to tested model')
+    parser.add_argument('--save_path', type=str,
+                        default=None, help='path for saving visualizations')
     parser.add_argument('--dataset', type=str, default='miniImageNet',
-                        choices=['tieredImageNet', 'miniImageNet', 'cdfsl', 'cub'], help='dataset')
+                        choices=['tieredImageNet',
+                                 'miniImageNet', 'cub', 'cdfsl'],
+                        help='choice of dataset for pre-training')
     parser.add_argument('--num_workers', type=int,
                         default=1, help='num of workers to use')
-    parser.add_argument('--batch_size', type=int,
-                        default=256, help='batch_size')
-    parser.add_argument('--topk', default=5, type=int,
-                        help='Number of topk NN to extract, when enhancing the batch size (Default 5).')
-    parser.add_argument('--use_clustering', default=False, type=bool_flag,
-                        help="Whether to use online clustering")
+    parser.add_argument("--seed", type=int, default=42, help="random seed")
 
-    ######
-    parser.add_argument('--out_dim', default=8192, type=int, help="""Dimensionality of
-        output for [CLS] token.""")
-    parser.add_argument('--momentum_teacher', default=0.996, type=float, help="""Base EMA
-        parameter for teacher update. The value is increased to 1 during training with cosine schedule.
-        We recommend setting a higher value with small batches: for example use 0.9995 with batch size of 256.""")
-    ########
-
-    # Model settings
+    # model settings
     parser.add_argument('--backbone', type=str, default='resnet18',
-                        choices=['resnet10', 'resnet18', 'resnet34', 'resnet50', 'deit_tiny'], help='Choice of backbone network for the encoder')
-    parser.add_argument('--size', type=int, default=224, help='input size')
-    parser.add_argument('--patch_size', type=int, default=16,
-                        help='size of input square patches for masking in pixels, default 16 (for 16x16 patches)')
+                        choices=['resnet10', 'resnet18',
+                                 'resnet34', 'resnet50'],
+                        help='Choice of backbone network for the encoder')
+    parser.add_argument('--size', type=int, default=224,
+                        help='input image size')
+    parser.add_argument('--topk', default=5, type=int,
+                        help='Number of topk NN to extract, when enhancing the \
+                        batch size.')
+    parser.add_argument('--out_dim', default=512, type=int,
+                        help="""Dimensionality of output.""")
 
-    parser.add_argument('--mask_ratio', default=0.0, type=float, nargs='+', help="""Ratio of masked-out patches.
-        If a list of ratio is specified, one of them will be randomly choosed for each image.""")
-    parser.add_argument('--mask_ratio_var', default=0, type=float, nargs='+', help="""Variance of partial prediction
-        ratio. Length should be indentical to the length of pred_ratio. 0 for disabling. """)
-    parser.add_argument('--mask_shape', default='block',
-                        type=str, help="""Shape of partial prediction.""")
-    parser.add_argument('--mask_start_epoch', default=0, type=int, help="""Start epoch to perform masked
-        image prediction. We typically set this to 50 for swin transformer. (Default: 0)""")
-
-    # self-supervision settings
-    parser.add_argument('--temp', type=float, default=2.0,
-                        help='temperature for loss function')
-    parser.add_argument('--lamb', type=float, default=0.1,
-                        help='lambda for uniform loss')
+    # parallelization settings
+    parser.add_argument("--dist_url", default="env://", type=str,
+                        help="""url used to set up distributed training; see \
+                        https://pytorch.org/docs/stable/distributed.html""")
+    parser.add_argument("--world_size", default=-1, type=int,
+                        help="""number of processes: it is set automatically and
+                        should not be passed as argument""")
+    parser.add_argument("--rank", default=0, type=int,
+                        help="""rank of this process: it is set automatically \
+                        and should not be passed as argument""")
+    parser.add_argument("--local_rank", default=0, type=int,
+                        help="this argument is not used and should be ignored")
 
     # few-shot evaluation settings
     parser.add_argument('--n_way', type=int, default=5, help='n_way')
@@ -85,20 +80,7 @@ def args_parser():
     parser.add_argument('--use_student', default=True, type=bool_flag,
                         help='whether to use student or teacher encoder for eval')
 
-    parser.add_argument("--seed", type=int, default=42, help="seed")
-
-    ###############################################################
-    parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
-        distributed training; see https://pytorch.org/docs/stable/distributed.html""")
-    parser.add_argument("--world_size", default=-1, type=int, help="""
-                        number of processes: it is set automatically and
-                        should not be passed as argument""")
-    parser.add_argument("--rank", default=0, type=int, help="""rank of this process:
-                        it is set automatically and should not be passed as argument""")
-    parser.add_argument("--local_rank", default=0, type=int,
-                        help="this argument is not used and should be ignored")
-
-    # Supervised finetuning parameters
+    # supervised finetuning settings
     parser.add_argument('--fine_tune', default=False, type=bool_flag,
                         help='whether to perform supervised fine-tuning')
     parser.add_argument('--sup_finetune_lr', type=float, default=0.001,
@@ -185,7 +167,7 @@ def finetune_fewshot(
 
 @torch.no_grad()
 def evaluate_fewshot(
-        encoder, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', power_norm=False, feature_extractor=None, vis=False):
+        args, encoder, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', power_norm=False, feature_extractor=None, visualize_OT=False):
 
     encoder.eval()
     accs = {}
@@ -285,6 +267,10 @@ def evaluate_fewshot(
         # -- Fit Logistic Regression Classifier
         for tb in range(test_batch_size):
             for n_shot in n_shots:
+                ########################################
+                if n_shot == 5:
+                    continue
+                ########################################
 
                 # (n_way * n_shot) x D
                 cur_sup_f = sup_f[tb, :, :n_shot, :].reshape(
@@ -334,17 +320,10 @@ def evaluate_fewshot(
                 acc = metrics.accuracy_score(cur_qry_y, cur_qry_pred)
                 acc_ot = metrics.accuracy_score(cur_qry_y, cur_qry_pred_ot)
 
-                if vis:
+                if visualize_OT:
                     visualize_optimal_transport(prototypes_before, prototypes, cur_qry_f,
-                                                cur_sup_y[::n_shot], cur_qry_y, "umap", idx+1, n_shot, n_way=n_way, n_query=n_query)
+                                                cur_sup_y[::n_shot], cur_qry_y, "umap", idx+1, n_shot, save_path=args.save_path, n_way=n_way, n_query=n_query)
 
-                # if acc_ot - acc > 0.2:
-                #     print("---- Episode: {} {}-shot -------".format(idx+1, n_shot))
-                #     print("Accuracy Before OT: {}".format(acc))
-                #     print("Accuracy After OT: {}".format(acc_ot))
-                #     visualize_optimal_transport(orginal_prototypes=prototypes_before, transported_prototypes=prototypes, z_query=cur_qry_f,
-                #                                 y_support=cur_sup_y[::n_shot], y_query=cur_qry_y, proj="umap", episode=idx+1, n_shot=n_shot, n_way=n_way, n_query=n_query)
-                #     print("\n")
                 accs[f'{n_shot}-shot'].append(acc)
                 accs_ot[f'{n_shot}-shot'].append(acc_ot)
 
@@ -385,34 +364,6 @@ def evaluate_imagenet(args):
 
     student, teacher = build_student_teacher(args)
 
-    ################################
-    # memory_size = (40 * 200 //
-    #                (256 * 2) + 1) * 256 * 2 + 1
-    memory_size = (2 * 100 //
-                   (16 * 2) + 1) * 16 * 2 + 1
-
-    params_groups = get_params_groups(student)
-    optimizer = torch.optim.SGD(
-        params_groups, lr=0, momentum=0.9)  # lr is set by scheduler
-    fp16_scaler = None
-    teacher_nn_replacer = NNmemoryBankModule2(
-        size=memory_size, origin="teacher")
-    student_nn_replacer = NNmemoryBankModule2(
-        size=memory_size, origin="student")
-    student_f_nn_replacer = NNmemoryBankModule2(
-        size=memory_size, origin="student_f")
-
-    print("Memory Size: {}".format(memory_size))
-
-    student, teacher, optimizer, fp16_scaler, start_epoch, loss, batch_size = load_student_teacher(
-        student, teacher, args.eval_path, teacher_nn_replacer,
-        student_nn_replacer, student_f_nn_replacer, optimizer=optimizer,
-        fp16_scaler=fp16_scaler)
-
-    visualize_memory(teacher_nn_replacer)
-    exit()
-    ###################################
-
     if args.eval_path is not None:
 
         student.load_state_dict(torch.load(args.eval_path)
@@ -434,7 +385,7 @@ def evaluate_imagenet(args):
             finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[1, 5],
                              n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
         else:
-            evaluate_fewshot(model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
+            evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
                 1, 5], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
 
             if "deit" in args.backbone:
@@ -476,7 +427,7 @@ def evaluate_cub(args):
             finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[5, 20],
                              n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
         else:
-            evaluate_fewshot(model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
+            evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
                 5, 20], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
 
             if "deit" in args.backbone:
@@ -558,7 +509,7 @@ def evaluate_cdfsl(args):
                 finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[5, 20],
                                  n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
             else:
-                evaluate_fewshot(model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
+                evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
                     5, 20], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
 
             if "deit" in args.backbone:
