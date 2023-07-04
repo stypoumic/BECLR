@@ -91,15 +91,12 @@ class MSiamLoss(nn.Module):
 
         loss = loss + self.lamb_neg * loss_neg
 
-        loss_patch = 0.0
-
         std = self.std(z_teacher)
 
         loss_state = {
             'loss': loss,
             'loss_pos': loss_pos,
             'loss_neg': loss_neg,
-            'loss_patch': loss_patch,
             'std': std
         }
         return loss_state
@@ -133,9 +130,10 @@ class MSiamLoss(nn.Module):
 
 
 class ClusterLoss(nn.Module):
-    def __init__(self):
+    def __init__(self, dist_metric="euclidean"):
         super(ClusterLoss, self).__init__()
         self.mse_loss = nn.MSELoss()
+        self.dist_metric = dist_metric
 
     def cross_entropy(self, x1, x2):
         # return -torch.mean(torch.sum(x1 * F.log_softmax(x2, dim=1), dim=1))
@@ -157,10 +155,16 @@ class ClusterLoss(nn.Module):
         p1, p2 = torch.split(p, [bsz, bsz], dim=0)
 
         # create cost matrix between student/teacher embeddings & cluster centers
-        za_1 = pairwise_euclidean_distance(z1, centers)
-        za_2 = pairwise_euclidean_distance(z2, centers)
-        pa_1 = pairwise_euclidean_distance(p1, centers)
-        pa_2 = pairwise_euclidean_distance(p2, centers)
+        if self.dist_metric == "cosine":
+            za_1 = torch.einsum("nd,md->nm", z1, centers)
+            za_2 = torch.einsum("nd,md->nm", z1, centers)
+            pa_1 = torch.einsum("nd,md->nm", z1, centers)
+            pa_2 = torch.einsum("nd,md->nm", z1, centers)
+        else:
+            za_1 = pairwise_euclidean_distance(z1, centers)
+            za_2 = pairwise_euclidean_distance(z2, centers)
+            pa_1 = pairwise_euclidean_distance(p1, centers)
+            pa_2 = pairwise_euclidean_distance(p2, centers)
 
         # apply optimal transport to get assignments (# BS x K)
         if args.cls_use_enhanced_batch:
@@ -192,29 +196,41 @@ class ClusterLoss(nn.Module):
             return (self.cross_entropy(za_1, pa_2) + self.cross_entropy(za_2, pa_1)) / 2
 
 
-# @torch.no_grad()
-def distributed_sinkhorn(out, epsilon, iterations):
-    # Q is K-by-B for consistency with notations from our paper
-    Q0 = torch.exp(out / epsilon).t()
-    B = Q0.shape[1]   # number of samples to assign
-    K = Q0.shape[0]  # how many prototypes
+@torch.no_grad()
+def distributed_sinkhorn(input, epsilon, iterations):
+    # ensure that input has not infinite values
+    np_input = input.cpu().numpy()
+    input[input == float("Inf")] = np.nanmax(np_input[np_input != np.inf]) + 10
 
-    # make the matrix sums to 1
-    sum_Q = torch.sum(Q0)
-    if dist.is_available() and dist.is_initialized():
-        dist.all_reduce(sum_Q)
-    Q = Q0 / sum_Q
+    # in case really high values are present in the input, gradually relax the
+    # OT problem, by increasing epsilon (In practice: a value of 0.05 should be
+    # enough to exit this loop)
+    while True:
+        # Q is K-by-B
+        Q = torch.exp(input / epsilon).t()
+        B = Q.shape[1]   # number of samples to assign
+        K = Q.shape[0]  # how many prototypes
+
+        # make the matrix sums to 1
+        sum_Q = torch.sum(Q)
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(sum_Q)
+        Q /= sum_Q
+
+        if not torch.isnan(Q).any():
+            break
+        epsilon += 0.1
 
     for it in range(iterations):
         # normalize each row: total weight per prototype must be 1/K
         sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
         if dist.is_available() and dist.is_initialized():
             dist.all_reduce(sum_of_rows)
-        Q1 = (Q / sum_of_rows) / K
+        Q /= sum_of_rows
+        Q /= K
 
         # normalize each column: total weight per sample must be 1/B
-        Q2 = (Q1 / torch.sum(Q1, dim=0, keepdim=True)) / B
-
-    # Q *= B  # the colomns must sum to 1 so that Q is an assignment
-    # print(torch.sum(Q, dim=1, keepdim=True))
-    return (Q2 * B).t()
+        Q /= torch.sum(Q, dim=0, keepdim=True)
+        Q /= B
+    Q *= B  # the colomns must sum to 1 so that Q is an assignment
+    return Q.t()

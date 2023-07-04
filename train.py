@@ -179,6 +179,9 @@ def args_parser():
     parser.add_argument('--cls_use_both_views', default=True, type=bool_flag,
                         help="Whether to enforce consistency for both views in \
                         clustering loss")
+    parser.add_argument('--cluster_loss_start_epoch', default=200, type=int,
+                        help=' Epoch after which the clustering loss is \
+                        activated.')
 
     # few-shot evaluation settings
     parser.add_argument('--n_way', type=int, default=5,
@@ -289,7 +292,10 @@ def train_msiam(args: dict):
     #     args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
     #     args.topk, args.num_clusters, args.memory_scale, args.lamb_neg, args.uniformity_config,
     #     args.use_clustering_loss, args.cls_use_enhanced_batch, args.cls_use_both_views, args.seed))
-    local_runs = Path(args.log_path)
+    if log_path == None:
+        log_path = Path(args.save_path) / Path("logs")
+    else:
+        local_runs = Path(args.log_path)
     print("Log Path: {}".format(local_runs))
     print("Checkpoint Save Path: {} \n".format(args.save_path))
 
@@ -370,7 +376,7 @@ def train_msiam(args: dict):
         # evaluate test performance every args.eval_freq epochs during training
         if (epoch) % args.eval_freq == 0 and epoch > 0:
             student.module.encoder.masked_im_modeling = False
-            results = evaluate_fewshot(student.module.encoder,
+            results = evaluate_fewshot(args, student.module.encoder,
                                        test_loader, n_way=args.n_way,
                                        n_shots=[1, 5], n_query=args.n_query,
                                        classifier='LR', power_norm=True)
@@ -384,7 +390,7 @@ def train_msiam(args: dict):
 
     # ============ Evaluate Few Shot Test performance ... ============
     student.module.encoder.masked_im_modeling = False
-    evaluate_fewshot(student.module.encoder,
+    evaluate_fewshot(args, student.module.encoder,
                      test_loader, n_way=args.n_way, n_shots=[1, 5],
                      n_query=args.n_query, classifier='LR', power_norm=True)
     student.module.encoder.masked_im_modeling = True
@@ -480,12 +486,10 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
         masks = torch.cat([masks[0], masks[1]],
                           dim=0).cuda(non_blocking=True)
 
-        # Add zero masking on the anchor branch
-        if args.mask_ratio[0] > 0.0 and "resnet" in args.backbone:
+        # Add zero masking on the teacher branch
+        if args.mask_ratio[0] > 0.0:
             masked_images = apply_mask_resnet(
                 images, masks, args.patch_size)
-        else:
-            masked_images = images
 
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             if 'deit' in args.backbone:
@@ -519,7 +523,7 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
                     memory=student_nn_replacer.bank.cuda())
 
                 # calculate clustering loss (if enabled)
-                if args.use_clustering_loss and epoch > args.memory_start_epoch \
+                if args.use_clustering_loss and epoch > args.cluster_loss_start_epoch \
                         and teacher_nn_replacer.start_clustering:
                     cl_loss = cluster_loss(
                         args, p, z_teacher, teacher_nn_replacer)
