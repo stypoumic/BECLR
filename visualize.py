@@ -79,7 +79,7 @@ def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=30, p
 
 @torch.no_grad()
 def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_query,
-                                y_support, y_query, proj, episode, n_shot,
+                                y_support, y_query, proj, episode, n_shot, save_path,
                                 n_way=5, n_query=15):
     df_sup_before = pd.DataFrame(orginal_prototypes)
     df_sup_before['class'] = pd.Series(y_support)
@@ -112,32 +112,21 @@ def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_qu
     print("Set DBI score after: {}".format(
         davies_bouldin_score(proj_2d_after, df['set'][n_way:])))
 
-    # sns.relplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1], hue=df['class'][:-n_way].astype(
-    #     int), palette="Dark2", style=df['set'][:-n_way].astype(int), s=df['set'][:-n_way]*150+50, legend=False)
-    # a = sns.kdeplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1],
-    #                 hue=df['class'][:-n_way].astype(int), palette="Pastel2", legend=False)
-    # sfig = a.get_figure()
-    # sfig.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_before.jpeg'.format(
-    #     proj, episode, n_shot), dpi=1000)
+    ax1 = sns.relplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1], hue=df['class'][:-n_way].astype(
+        int), palette="Dark2", style=df['set'][:-n_way].astype(int), s=df['set'][:-n_way]*150+50, legend=False, facet_kws=dict(despine=False))
+    ax1.set(yticklabels=[])
+    ax1.tick_params(left=False)
+    ax1.set(xticklabels=[])
+    ax1.tick_params(bottom=False)
+    plt.savefig(Path(save_path) / Path(proj+"_ep"+str(episode) +
+                "_"+str(n_shot)+"-shot_before.jpeg"), dpi=1000)
 
-    # sns.relplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1], hue=df['class'][n_way:].astype(
-    #     int), palette="Dark2", style=df['set'][n_way:].astype(int), s=df['set'][n_way:]*150+50, legend=False)
-    # b = sns.kdeplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1],
-    #                 hue=df['class'][n_way:].astype(int), palette="Pastel2", legend=False)
-    # sfig = b.get_figure()
-    # sfig.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_after.jpeg'.format(
-    #     proj, episode, n_shot), dpi=1000)
-
-    sns.relplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1], hue=df['class'][:-n_way].astype(
-        int), palette="Dark2", style=df['set'][:-n_way].astype(int), s=df['set'][:-n_way]*150+50, legend=False)
-    sns.despine(right=True)
-    plt.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_before.jpeg'.format(
-        proj, episode, n_shot), dpi=1000)
-
-    sns.relplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1], hue=df['class'][n_way:].astype(
-        int), palette="Dark2", style=df['set'][n_way:].astype(int), s=df['set'][n_way:]*150+50, legend=False)
-    sns.despine(right=True)
-    plt.savefig('C:/GitHub/msiam/visualizations/{}_ep{}_{}-shot_after.jpeg'.format(
-        proj, episode, n_shot), dpi=1000)
-
+    ax2 = sns.relplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1], hue=df['class'][n_way:].astype(
+        int), palette="Dark2", style=df['set'][n_way:].astype(int), s=df['set'][n_way:]*150+50, legend=False, facet_kws=dict(despine=False))
+    ax2.set(yticklabels=[])
+    ax2.tick_params(left=False)
+    ax2.set(xticklabels=[])
+    ax2.tick_params(bottom=False)
+    plt.savefig(Path(save_path) / Path(proj+"_ep"+str(episode) +
+                "_"+str(n_shot)+"-shot_after.jpeg"), dpi=1000)
     return
