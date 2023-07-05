@@ -15,7 +15,7 @@ from dataset.miniImageNet import miniImageNet
 from dataset.sampler import EpisodeSampler
 from dataset.tieredImageNet import tieredImageNet
 from models import resnet10, resnet18, resnet34, resnet50
-from models.msiam import MSiam
+from models.beclr import BECLR
 
 
 def init_distributed_mode(args):
@@ -138,9 +138,9 @@ def build_student_teacher(args):
     teacher_encoder = model_dict[args.backbone]()
     embed_dim = student_encoder.out_dim
 
-    student = MSiam(encoder=student_encoder, dim_in=embed_dim,
+    student = BECLR(encoder=student_encoder, dim_in=embed_dim,
                     args=args, is_teacher=False)
-    teacher = MSiam(encoder=teacher_encoder, dim_in=embed_dim,
+    teacher = BECLR(encoder=teacher_encoder, dim_in=embed_dim,
                     args=args, is_teacher=True)
 
     # move networks to gpu

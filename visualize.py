@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")
 from umap import UMAP  # noqa
 
 
-def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=30, proj="umap", epoch=0):
+def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=20, proj="umap", epoch=0):
     print("==> Visualizing Memory Embeddings...")
     unique_label_counts = np.array(
         memory_bank.labels.unique(return_counts=True)[-1].cpu())
@@ -36,9 +36,13 @@ def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=30, p
 
     # discard classes with fewer than n_samples assgined to them
     discarded_labels = [idx for idx, val in enumerate(
-        unique_label_counts) if val <= n_samples]
+        unique_label_counts) if val < n_samples]
     discarded_indices = np.argwhere(np.isin(unique_labels, discarded_labels))
     unique_labels = np.delete(unique_labels, discarded_indices)
+
+    if len(unique_labels) < n_class:
+        print("Error with memory configuration")
+        return
 
     # randomly select n_class classes from the memory
     unique_labels = np.random.choice(unique_labels, n_class, replace=False)

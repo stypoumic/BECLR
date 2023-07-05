@@ -53,9 +53,9 @@ class Solarization(object):
             return img
 
 
-class DataAugmentationMSiam(object):
+class DataAugmentationBECLR(object):
     """
-    Data Augmentation class for MSiam
+    Data Augmentation class for BECLR
     """
 
     def __init__(self, args):

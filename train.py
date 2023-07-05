@@ -17,8 +17,8 @@ from tqdm import tqdm
 from dataset.mask_loader import ImageFolderMask
 from evaluate import evaluate_fewshot
 from memory import NNmemoryBankModule
-from models.msiam import ClusterLoss, MSiamLoss
-from transform.build_transform import DataAugmentationMSiam
+from models.beclr import ClusterLoss, BECLRLoss
+from transform.build_transform import DataAugmentationBECLR
 from utils import (LARS, AverageMeter, apply_mask_resnet, bool_flag,
                    build_fewshot_loader, build_student_teacher,
                    cancel_gradients_last_layer, cosine_scheduler,
@@ -31,7 +31,7 @@ torch.cuda.empty_cache()
 
 def args_parser():
     parser = argparse.ArgumentParser(
-        'MSiam training arguments', add_help=False)
+        'BECLR training arguments', add_help=False)
 
     parser.add_argument('--save_path', type=str,
                         default=None, help='path for saving checkpoints')
@@ -179,7 +179,7 @@ def args_parser():
     parser.add_argument('--cls_use_both_views', default=True, type=bool_flag,
                         help="Whether to enforce consistency for both views in \
                         clustering loss")
-    parser.add_argument('--cluster_loss_start_epoch', default=200, type=int,
+    parser.add_argument('--cluster_loss_start_epoch', default=100, type=int,
                         help=' Epoch after which the clustering loss is \
                         activated.')
 
@@ -211,7 +211,7 @@ def args_parser():
     return parser
 
 
-def train_msiam(args: dict):
+def train_beclr(args: dict):
     """
     Performs the self-supervised pre-training stage of the network.
 
@@ -228,7 +228,7 @@ def train_msiam(args: dict):
     test_loader = build_fewshot_loader(args, 'test')
 
     # build data augmentationss
-    transform = DataAugmentationMSiam(args)
+    transform = DataAugmentationBECLR(args)
 
     if args.dataset == "miniImageNet":
         data_path = Path(args.data_path) / Path("miniimagenet_train")
@@ -262,9 +262,9 @@ def train_msiam(args: dict):
     student, teacher = build_student_teacher(args)
 
     # ============ preparing loss ... ============
-    msiam_loss = MSiamLoss(args, lamb_neg=args.lamb_neg,
+    beclr_loss = BECLRLoss(args, lamb_neg=args.lamb_neg,
                            temp=args.temp).cuda()
-    cluster_loss = ClusterLoss().cuda()
+    cluster_loss = ClusterLoss(dist_metric=args.memory_dist_metric).cuda()
 
     # ============ preparing memory queue ... ============
     memory_size = (args.memory_scale * args.num_clusters //
@@ -292,8 +292,8 @@ def train_msiam(args: dict):
     #     args.momentum_teacher, args.dist, args.use_fp16, args.memory_start_epoch,
     #     args.topk, args.num_clusters, args.memory_scale, args.lamb_neg, args.uniformity_config,
     #     args.use_clustering_loss, args.cls_use_enhanced_batch, args.cls_use_both_views, args.seed))
-    if log_path == None:
-        log_path = Path(args.save_path) / Path("logs")
+    if args.log_path == None:
+        local_runs = Path(args.save_path) / Path("logs")
     else:
         local_runs = Path(args.log_path)
     print("Log Path: {}".format(local_runs))
@@ -347,16 +347,16 @@ def train_msiam(args: dict):
             fp16_scaler=fp16_scaler)
 
     start_time = time.time()
-    print("Starting MSiam training!")
+    print("Starting BECLR training!")
     for epoch in tqdm(range(start_epoch, args.epochs)):
         time1 = time.time()
         # data_loader.sampler.set_epoch(epoch)
         data_loader.dataset.set_epoch(epoch)
 
-        # ============ training one epoch of MSiam ... ============
+        # ============ training one epoch of BECLR ... ============
         loss = train_one_epoch(data_loader, student, teacher, optimizer,
                                fp16_scaler, epoch, lr_schedule, wd_schedule,
-                               momentum_schedule, writer, msiam_loss, args,
+                               momentum_schedule, writer, beclr_loss, args,
                                teacher_nn_replacer, student_nn_replacer,
                                student_f_nn_replacer, cluster_loss)
         time2 = time.time()
@@ -411,7 +411,7 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
                     wd_schedule: np.array,
                     momentum_schedule: np.array,
                     writer: SummaryWriter,
-                    msiam_loss: nn.Module,
+                    beclr_loss: nn.Module,
                     args: dict,
                     teacher_nn_replacer: NNmemoryBankModule,
                     student_nn_replacer: NNmemoryBankModule,
@@ -431,7 +431,7 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
         - wd_schedule (np.array): weight decay cosine schedule
         - momentum_schedule (np.array): teacher momentum cosine schedule
         - writer (SummaryWriter): TensorBoard SummaryWritter
-        - msiam_loss (nn.module): contrastive loss module
+        - beclr_loss (nn.module): contrastive loss module
         - args (dict): parsed keyword training arguments
         - teacher_nn_replacer: teacher memory queue 
         - student_nn_replacer: student memory queue 
@@ -518,7 +518,7 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
                             z_student, epoch, args, k=args.topk, update=True)
 
                 # calculate contrastive loss
-                loss_state = msiam_loss(
+                loss_state = beclr_loss(
                     z_teacher, p, z_student, args, epoch=epoch,
                     memory=student_nn_replacer.bank.cuda())
 
@@ -599,7 +599,7 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
 if __name__ == '__main__':
     # parse training arguments
     parser = argparse.ArgumentParser(
-        'MSiam training arguments', parents=[args_parser()])
+        'BECLR training arguments', parents=[args_parser()])
     args = parser.parse_args()
 
     args.split_path = (Path(__file__).parent).joinpath('split')
@@ -609,4 +609,4 @@ if __name__ == '__main__':
     fix_random_seeds(args.seed)
 
     Path(args.save_path).mkdir(parents=True, exist_ok=True)
-    train_msiam(args)
+    train_beclr(args)

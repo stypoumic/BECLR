@@ -28,7 +28,7 @@ from visualize import visualize_memory, visualize_optimal_transport
 
 def args_parser():
     parser = argparse.ArgumentParser(
-        'MSiam evaluation arguments', add_help=False)
+        'BECLR evaluation arguments', add_help=False)
 
     parser.add_argument('--data_path', type=str,
                         default=None, help='path to dataset root')
@@ -267,10 +267,6 @@ def evaluate_fewshot(
         # -- Fit Logistic Regression Classifier
         for tb in range(test_batch_size):
             for n_shot in n_shots:
-                ########################################
-                if n_shot == 5:
-                    continue
-                ########################################
 
                 # (n_way * n_shot) x D
                 cur_sup_f = sup_f[tb, :, :n_shot, :].reshape(
@@ -519,7 +515,7 @@ def evaluate_cdfsl(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        'MSiam evaluation arguments', parents=[args_parser()])
+        'BECLR evaluation arguments', parents=[args_parser()])
     args = parser.parse_args()
     # need to change that
     args.dist = False
