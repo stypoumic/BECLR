@@ -6,8 +6,9 @@ import torch.nn.functional as F
 from lightly.loss.memory_bank import MemoryBankModule
 from sklearn import cluster
 from torchmetrics.functional import pairwise_euclidean_distance
+from sinkhorn import distributed_sinkhorn
 
-from visualize import visualize_memory_embeddings
+from visualize import visualize_memory
 
 
 def clusterer(z, algo='kmeans', n_clusters=5, metric='euclidean', hdb_min_cluster_size=4):
@@ -53,6 +54,7 @@ class NNmemoryBankModule(MemoryBankModule):
         )
         self.start_clustering = False
         self.last_cluster_epoch = 0
+        self.last_vis_epoch = 0
         self.topk1 = 1
         self.topk2 = 1
         self.origin = origin
@@ -76,8 +78,13 @@ class NNmemoryBankModule(MemoryBankModule):
                                        algo="kmeans")
             # get cluster means & labels
             centers = clf.cluster_centers_
-            self.centers = torch.from_numpy(centers).type_as(bank).cpu()
-            self.labels = torch.from_numpy(labels).type_as(bank).long().cpu()
+            centers = torch.from_numpy(centers).type_as(bank).cpu()
+            labels = torch.from_numpy(labels).type_as(bank).long().cpu()
+            # do not upddate the clusters in the memory in case of redundancy from kmeans
+            if self.start_clustering and len(labels.unique(return_counts=True)[-1]) < num_clusters:
+                return
+            self.centers = centers
+            self.labels = labels
         else:
             # possibly reranking before clustering
             clf, labels, probs = clusterer(
@@ -146,8 +153,15 @@ class NNmemoryBankModule(MemoryBankModule):
             # create cost matrix between batch embeddings & cluster centers
             Q = torch.einsum("nd,md->nm", z_normed, centers_normed)  # BS x K
         else:
+            # Normalize batch & memory embeddings
+            z_normed = torch.nn.functional.normalize(z, dim=1)  # BS x D
+            centers_normed = torch.nn.functional.normalize(
+                centers, dim=1).cuda()  # K x D
             # create cost matrix between batch embeddings & cluster centers
-            Q = pairwise_euclidean_distance(z, centers.cuda())
+            Q = pairwise_euclidean_distance(z_normed, centers_normed)
+
+            # create cost matrix between batch embeddings & cluster centers
+            # Q = pairwise_euclidean_distance(z, centers.cuda())
 
         # apply optimal transport between batch embeddings and cluster centers
         Q = distributed_sinkhorn(
@@ -182,10 +196,6 @@ class NNmemoryBankModule(MemoryBankModule):
                 unique_labels = torch.cat((unique_labels, label), 0)
                 labels_count = torch.cat(
                     (labels_count, torch.tensor([0.001])), 0)
-        # _, indices = torch.sort(unique_labels, 0)
-        # sort_index = indices[:,0]
-        # unique_labels = unique_labels[sort_index, :]
-        # labels_count
 
         # get cluster means
         centers_next = torch.zeros_like(unique_labels, dtype=torch.float).scatter_add_(
@@ -216,14 +226,12 @@ class NNmemoryBankModule(MemoryBankModule):
         if self.start_clustering == False:
             # if memory is full for the first time
             if ptr + bsz >= self.size:
-                # if epoch >= args.memory_start_epoch:
                 # cluster memory embeddings for the first time
                 self.cluster_memory_embeddings(
                     cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
-                # self.random_memory_split(args)
+
                 self.last_cluster_epoch = epoch
                 self.start_clustering = True
-                print(self.labels.unique(return_counts=True)[-1].size())
                 print("--Unique Labels Counts--: {}-------\n".format(
                     self.labels.unique(return_counts=True)[-1]))
 
@@ -239,22 +247,27 @@ class NNmemoryBankModule(MemoryBankModule):
         else:
             if args.recluster and epoch % args.cluster_freq == 0 and epoch != self.last_cluster_epoch:
                 # restart the memory clusters
+                print("--Unique Labels Counts--: {}-------\n".format(
+                    self.labels.unique(return_counts=True)[-1]))
                 self.cluster_memory_embeddings(
                     cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
                 self.last_cluster_epoch = epoch
 
-            if epoch % args.visual_freq == 0 and epoch != self.last_cluster_epoch:
+            if len(self.labels.unique(return_counts=True)[-1]) <= 1:
+                # restart memory clusters in case the memory embeddings have
+                # converged to a single cluster
+                # (In practice: not used, but covers the case when not suitable
+                # hyperparameters for the OT memory updating have been chosen)
+                self.cluster_memory_embeddings(
+                    cluster_algo=args.cluster_algo, num_clusters=args.num_clusters)
                 self.last_cluster_epoch = epoch
-                print(self.labels.unique(return_counts=True)[-1].size())
-                print("--Unique Labels Counts--: {}-------\n".format(
-                    self.labels.unique(return_counts=True)[-1]))
-                # Visualize memory embeddings using tSNE
+
+            if epoch % args.visual_freq == 0 and epoch != self.last_vis_epoch:
+                self.last_vis_epoch = epoch
+                # Visualize memory embeddings using UMAP
                 if self.origin == "teacher" or self.origin == "student":
-                    visualize_memory_embeddings(np.array(self.bank.T.detach().cpu()),
-                                                np.array(
-                                                    self.labels.detach().cpu()),
-                                                args.num_clusters, args.save_path,
-                                                origin=self.origin, epoch=epoch)
+                    visualize_memory(self, args.save_path,
+                                     self.origin, epoch=epoch)
 
             # Add latest batch to the memory queue using Optimal Transport
             output, bank = self.add_memory_embdeddings_OT(
@@ -396,33 +409,3 @@ class NNmemoryBankModule(MemoryBankModule):
             return z
         else:
             return output
-
-
-@torch.no_grad()
-def distributed_sinkhorn(out, epsilon, iterations):
-    # Q is K-by-B for consistency with notations from our paper
-    Q = torch.exp(out / epsilon).t()
-    B = Q.shape[1]   # number of samples to assign
-    K = Q.shape[0]  # how many prototypes
-
-    # make the matrix sums to 1
-    sum_Q = torch.sum(Q)
-    if dist.is_available() and dist.is_initialized():
-        dist.all_reduce(sum_Q)
-    Q /= sum_Q
-
-    for it in range(iterations):
-        # normalize each row: total weight per prototype must be 1/K
-        sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
-        if dist.is_available() and dist.is_initialized():
-            dist.all_reduce(sum_of_rows)
-        Q /= sum_of_rows
-        Q /= K
-
-        # normalize each column: total weight per sample must be 1/B
-        Q /= torch.sum(Q, dim=0, keepdim=True)
-        Q /= B
-
-    Q *= B  # the colomns must sum to 1 so that Q is an assignment
-    # print(torch.sum(Q, dim=1, keepdim=True))
-    return Q.t()
