@@ -23,7 +23,6 @@ def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=20, p
     if len(unique_label_counts) <= 1:
         print("Error with memory configuration")
         return
-    print("--Unique Labels Counts--: {}-------\n".format(unique_label_counts))
 
     bank = np.array(memory_bank.bank.T.detach().cpu())
     labels = np.array(memory_bank.labels.detach().cpu())
@@ -36,9 +35,11 @@ def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=20, p
 
     # discard classes with fewer than n_samples assgined to them
     discarded_labels = [idx for idx, val in enumerate(
-        unique_label_counts) if val < n_samples]
+        unique_label_counts) if val <= n_samples]
+    print("Discarded: {}".format(np.sort(discarded_labels)))
     discarded_indices = np.argwhere(np.isin(unique_labels, discarded_labels))
     unique_labels = np.delete(unique_labels, discarded_indices)
+    print("Unique: {}".format(np.sort(unique_labels)))
 
     if len(unique_labels) < n_class:
         print("Error with memory configuration")
@@ -46,15 +47,24 @@ def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=20, p
 
     # randomly select n_class classes from the memory
     unique_labels = np.random.choice(unique_labels, n_class, replace=False)
+    print("Unique after Sampling: {}".format(np.sort(unique_labels)))
 
     # keep only samples from selected claasses
+    df_memory_bank = df_memory_bank[~df_memory_bank['class'].isin(
+        discarded_labels)]
     df_memory_bank = df_memory_bank[df_memory_bank['class'].isin(
         unique_labels)]
 
     # keep only n_samples per class for visualization purposes
-    df_memory_bank = df_memory_bank.groupby(
-        'class', group_keys=False).apply(lambda df: df.sample(n_samples))
-    print(df_memory_bank.shape)
+    print("Df Unique classes: {}".format(
+        np.sort(df_memory_bank['class'].unique())))
+
+    try:
+        df_memory_bank = df_memory_bank.groupby(
+            'class', group_keys=False).apply(lambda df: df.sample(n_samples))
+    except:
+        print("-----------------MEMORY ERROR----------------")
+        return
 
     if proj == "tsne":
         tsne = TSNE(n_components=2, verbose=0)
