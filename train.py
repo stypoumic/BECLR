@@ -96,6 +96,8 @@ def args_parser():
                         help="""When the cosine similarity of two embeddings is \
                         above this threshold, they are treated as positives, \
                         and masked out from the uniformity loss""")
+    parser.add_argument('--use_only_batch_neg', default=False, type=bool_flag,
+                        help="Whether to use memory in uniformity loss")
 
     # memory settings
     parser.add_argument("--memory_scale", default=20, type=int,
@@ -112,7 +114,7 @@ def args_parser():
     parser.add_argument('--cluster_freq', type=int,
                         default=60, help='memory reclustering frequency')
     parser.add_argument('--memory_start_epoch', default=50, type=int,
-                        help=' Epoch after which NNCLR, or enhance_batch is \
+                        help=' Epoch after which enhance_batch is \
                         activated.')
     parser.add_argument('--memory_momentum', default=0.0, type=float,
                         help="""the momentum value for updating the cluster \

@@ -61,19 +61,16 @@ class BECLRLoss(nn.Module):
 
     def forward(self, z_teacher, p_student, z_student, args, epoch=None, memory=None):
 
-        z_bsz = p_bsz = args.batch_size
-        if epoch >= args.memory_start_epoch:
-            if args.enhance_batch:
-                z_bsz = p_bsz = args.batch_size * (1 + args.topk)
-            elif args.use_nnclr:
-                z_bsz = args.batch_size * (args.topk)
+        bsz = args.batch_size
+        if epoch >= args.memory_start_epoch and args.enhance_batch:
+            bsz = args.batch_size * (1 + args.topk)
 
-        z1, z2 = torch.split(z_teacher, [z_bsz, z_bsz], dim=0)
-        z1_s, z2_s = torch.split(z_student, [p_bsz, p_bsz], dim=0)
-        p1, p2 = torch.split(p_student, [p_bsz, p_bsz], dim=0)
-        if z_bsz != p_bsz:
-            p1 = p1.repeat(args.topk, 1)
-            p2 = p2.repeat(args.topk, 1)
+        z1, z2 = torch.split(z_teacher, [bsz, bsz], dim=0)
+        z1_s, z2_s = torch.split(z_student, [bsz, bsz], dim=0)
+        p1, p2 = torch.split(p_student, [bsz, bsz], dim=0)
+        # if z_bsz != p_bsz:
+        #     p1 = p1.repeat(args.topk, 1)
+        #     p2 = p2.repeat(args.topk, 1)
 
         loss_pos = (self.pos(p1, z2)+self.pos(p2, z1))/2
 
@@ -82,14 +79,16 @@ class BECLRLoss(nn.Module):
             if args.uniformity_config == "SS":
                 z2 = z2_s
 
+        if epoch >= args.memory_start_epoch and args.use_only_batch_neg:
+            z1 = z1[:args.batch_size, :]
+            z2 = z2[:args.batch_size, :]
+
         if self.args.use_memory_in_loss:
             loss_neg = self.neg(z1, z2, epoch, memory, args.pos_threshold)
         else:
             loss_neg = self.neg(z1, z2)
 
-        loss = loss_pos
-
-        loss = loss + self.lamb_neg * loss_neg
+        loss = loss_pos + self.lamb_neg * loss_neg
 
         std = self.std(z_teacher)
 
