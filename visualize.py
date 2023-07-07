@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")
 from umap import UMAP  # noqa
 
 
-def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=20, proj="umap", epoch=0):
+def visualize_memory(memory_bank, save_path, origin, n_class=25, n_samples=40, proj="umap", epoch=0):
     print("==> Visualizing Memory Embeddings...")
     unique_label_counts = np.array(
         memory_bank.labels.unique(return_counts=True)[-1].cpu())
@@ -65,6 +65,8 @@ def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=20, p
     except:
         print("-----------------MEMORY ERROR----------------")
         return
+    # reset index
+    df_memory_bank = df_memory_bank.reset_index(drop=True)
 
     if proj == "tsne":
         tsne = TSNE(n_components=2, verbose=0)
@@ -76,8 +78,18 @@ def visualize_memory(memory_bank, save_path, origin, n_class=50, n_samples=20, p
     print("DBI score: {}".format(
         davies_bouldin_score(proj_2d, df_memory_bank['class'])))
 
+    if n_class == 25:
+        # adjust marker sizes in default 25-class visualization setting
+        sizes = np.repeat(
+            np.array([120, 120, 120, 120, 120, 160, 120, 160, 120, 140, 120, 140, 120, 150, 120, 120, 120, 120, 120, 160, 120, 160, 120, 140, 120]), n_samples)
+        df_memory_bank['size'] = pd.Series(sizes)
+    else:
+        sizes = 120
+
     ax = sns.relplot(x=proj_2d[:, 0], y=proj_2d[:, 1], hue=df_memory_bank['class'].astype(
-        int), palette="Dark2", style=df_memory_bank['class'].astype(int), s=35, legend=False, facet_kws=dict(despine=False))
+        int), palette="Dark2", style=df_memory_bank['class'].astype(int), s=sizes, legend=False, facet_kws=dict(despine=False))
+    # ax = sns.kdeplot(x=proj_2d[:, 0], y=proj_2d[:, 1],
+    #                  hue=df_memory_bank['class'].astype(int), palette="Pastel2", legend=False)
     ax.set(yticklabels=[])
     ax.tick_params(left=False)
     ax.set(xticklabels=[])
