@@ -6,9 +6,9 @@ import torch.nn.functional as F
 from lightly.loss.memory_bank import MemoryBankModule
 from sklearn import cluster
 from torchmetrics.functional import pairwise_euclidean_distance
-from sinkhorn import distributed_sinkhorn
+from sinkhorn import distributed_sinkhorn, sinkhorn2
 
-from visualize import visualize_memory
+from visualize import visualize_memory, visualize_memory_batch
 
 
 def clusterer(z, algo='kmeans', n_clusters=5, metric='euclidean', hdb_min_cluster_size=4):
@@ -58,12 +58,14 @@ class NNmemoryBankModule(MemoryBankModule):
         self.topk1 = 1
         self.topk2 = 1
         self.origin = origin
+        # self.idx = 0            # TO REMOVE
 
     def load_memory_bank(self, memory_bank: tuple):
         self.bank = memory_bank[0]
         self.bank_ptr = memory_bank[1]
         self.labels = memory_bank[2]
         self.centers = memory_bank[3]
+        self.start_clustering = True
 
     @torch.no_grad()
     def cluster_memory_embeddings(self, cluster_algo="kmeans", num_clusters=300,
@@ -164,8 +166,11 @@ class NNmemoryBankModule(MemoryBankModule):
             # Q = pairwise_euclidean_distance(z, centers.cuda())
 
         # apply optimal transport between batch embeddings and cluster centers
-        Q = distributed_sinkhorn(
-            Q, args.epsilon, args.sinkhorn_iterations)  # BS x K
+        if args.use_sinnkhorn_ver2:
+            Q = sinkhorn2(z_normed, centers_normed, eps=args.epsilon)
+        else:
+            Q = distributed_sinkhorn(
+                Q, args.epsilon, args.sinkhorn_iterations)  # BS x K
 
         # get assignments (batch labels)
         batch_labels = torch.argmax(Q, dim=1)
@@ -216,7 +221,7 @@ class NNmemoryBankModule(MemoryBankModule):
                     epoch: int,
                     args,
                     k: int = 5,
-                    labels: torch.Tensor = None,
+                    test_batch_labels: torch.Tensor = None,     # TO REMOVE
                     update: bool = False):
 
         ptr = int(self.bank_ptr) if self.bank.nelement() != 0 else 0
@@ -242,7 +247,7 @@ class NNmemoryBankModule(MemoryBankModule):
             else:
                 # Add latest batch to the memory queue (update memory only from both view)
                 output, bank = super(NNmemoryBankModule, self).forward(
-                    output, labels, update)
+                    output, None, update)
                 use_clustering = False
         else:
             if args.recluster and epoch % args.cluster_freq == 0 and epoch != self.last_cluster_epoch:
@@ -267,7 +272,7 @@ class NNmemoryBankModule(MemoryBankModule):
                 # Visualize memory embeddings using UMAP
                 if self.origin == "teacher" or self.origin == "student":
                     visualize_memory(self, args.save_path,
-                                     self.origin, epoch=epoch)
+                                     self.origin, epoch=epoch, n_samples=args.memory_scale)
 
             # Add latest batch to the memory queue using Optimal Transport
             output, bank = self.add_memory_embdeddings_OT(
@@ -318,6 +323,14 @@ class NNmemoryBankModule(MemoryBankModule):
                     z_center_similarity_matrix_1, self.topk1, dim=1)
                 _, topk_clusters_2 = torch.topk(
                     z_center_similarity_matrix_2, self.topk2, dim=1)
+
+                ##############################################################################################################
+                # # # # TO REMOVE
+                # if self.origin == "teacher" or self.origin == "student":
+                #     visualize_memory_batch(
+                #         z1, test_batch_labels, centers, "C:/GitHub/msiam/visualizations", proj="umap", origin=self.origin, idx=self.idx)
+                #     self.idx += 1
+                #############################################################################################################
 
                 z1_final = z1.clone()
                 z2_final = z2.clone()

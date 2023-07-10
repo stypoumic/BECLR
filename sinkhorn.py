@@ -4,7 +4,73 @@ from torch import nn
 import numpy as np
 
 
+def M(C, u, v, eps):
+    """Modified cost for logarithmic updates
+    $M_{ij} = (-c_{ij} + u_i + v_j) / \epsilon$
+    """
+    return (-C + u.unsqueeze(-1) + v.unsqueeze(-2)) / eps
+
+
+def cost_matrix(x, y, p=2):
+    "Returns the matrix of $|x_i-y_j|^p$."
+    x_col = x.unsqueeze(-2)
+    y_lin = y.unsqueeze(-3)
+    C = torch.sum((torch.abs(x_col - y_lin)) ** p, -1)
+    return C
+
+
+def sinkhorn2(x, y, max_iter=1000, eps=0.05, thresh=1e-4, device="cuda"):
+    # The Sinkhorn algorithm takes as input three variables :
+    C = cost_matrix(x, y)  # Wasserstein cost function
+    cost_normalization = C.max()
+    C = (
+        C / cost_normalization
+    )  # Needs to normalize the matrix to be consistent with reg
+
+    x_points = x.shape[-2]
+    y_points = y.shape[-2]
+    if x.dim() == 2:
+        batch_size = 1
+    else:
+        batch_size = x.shape[0]
+
+    # both marginals are fixed with equal weights
+    mu = torch.empty(batch_size, x_points, dtype=torch.float, requires_grad=False).fill_(
+        1.0 / x_points).squeeze().to(device)
+
+    nu = torch.empty(batch_size, y_points, dtype=torch.float, requires_grad=False).fill_(
+        1.0 / y_points).squeeze().to(device)
+
+    u = torch.zeros_like(mu)
+    v = torch.zeros_like(nu)
+    # To check if algorithm terminates because of threshold
+    # or max iterations reached
+    actual_nits = 0
+
+    # Sinkhorn iterations
+    for i in range(max_iter):
+        u1 = u  # useful to check the update
+        u = (eps * (torch.log(mu + 1e-8) -
+             torch.logsumexp(M(C, u, v, eps), dim=-1)) + u)
+        v = (eps * (torch.log(nu + 1e-8) -
+             torch.logsumexp(M(C, u, v, eps).transpose(-2, -1), dim=-1)) + v)
+        err = (u - u1).abs().sum(-1).mean()
+
+        actual_nits += 1
+        if err.item() < thresh:
+            break
+
+    U, V = u, v
+    # Transport plan pi = diag(a)*K*diag(b)
+    pi = torch.exp(M(C, U, V, eps))
+    # Sinkhorn distance
+    cost = torch.sum(pi * C, dim=(-2, -1))
+
+    return pi
+
 # Adapted from https://github.com/dfdazac/wassdistance
+
+
 class Sinkhorn(nn.Module):
     r"""
     Given two empirical measures each with :math:`P_1` locations
