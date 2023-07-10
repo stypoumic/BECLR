@@ -3,6 +3,7 @@ import copy
 import math
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -109,7 +110,7 @@ def groupedAvg(myArray, N):
 
 
 def finetune_fewshot(
-        args, encoder, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', power_norm=False, feature_extractor=None):
+        args, encoder, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR'):
 
     encoder.eval()
     accs = {}
@@ -156,8 +157,8 @@ def finetune_fewshot(
         std = acc.std()
         c95 = 1.96*std/math.sqrt(acc.shape[0])
 
-        print('classifier: {}, power_norm: {}, {}-way {}-shot acc: {:.2f}+{:.2f}'.format(
-            classifier, power_norm, n_way, n_shot, mean*100, c95*100))
+        print('classifier: {}, {}-way {}-shot acc: {:.2f}+{:.2f}'.format(
+            classifier, n_way, n_shot, mean*100, c95*100))
         print("------------------------------------------------------\n")
         results_shot.append(mean*100)
         results_shot.append(c95*100)
@@ -167,7 +168,7 @@ def finetune_fewshot(
 
 @torch.no_grad()
 def evaluate_fewshot(
-        args, encoder, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', power_norm=False, feature_extractor=None, visualize_OT=False):
+        args, encoder, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', visualize_OT=False):
 
     encoder.eval()
     accs = {}
@@ -189,54 +190,6 @@ def evaluate_fewshot(
         images = images.cuda(non_blocking=True)
 
         f = encoder(images)
-
-        if feature_extractor != None:
-            x = f[:, :, None, None]
-            G = f.permute(1, 0)
-
-            w1 = feature_extractor.fe[0].weight.flatten(start_dim=1)
-            # only keep first TBS weights from first layer
-            # # pooling = nn.AdaptiveAvgPool2d((G.shape[1], 1))
-            pooling = nn.AdaptiveMaxPool2d((G.shape[1], 1))
-            w1 = pooling(w1[:, :, None]).flatten(start_dim=1)
-            # w1 = w1[:, :G.shape[1]]
-
-            w2 = feature_extractor.fe[2].weight.flatten(start_dim=1)
-
-            G = torch.matmul(G, w1.t())
-            G = feature_extractor.fe[1](G)
-            G = torch.matmul(G, w2.t())[:, :, None, None]
-            G = feature_extractor.fe[3](G)
-
-            xq = feature_extractor.f_q(G)
-            xk = feature_extractor.f_k(G)
-            xv = feature_extractor.f_v(G)
-
-            xq = xq.squeeze(dim=1).squeeze(dim=1).transpose(
-                0, 1).reshape(-1, x.shape[2], x.shape[3])
-            xk = xk.squeeze(dim=1).squeeze(dim=1).transpose(
-                0, 1).reshape(-1, x.shape[2], x.shape[3])
-            xv = xv.squeeze(dim=1).squeeze(dim=1).transpose(
-                0, 1).reshape(-1, x.shape[2], x.shape[3])
-
-            # Attention Block
-            xq = xq.reshape(xq.shape[0], xq.shape[1]*xq.shape[2])
-            xk = xk.reshape(xk.shape[0], xk.shape[1]*xk.shape[2])
-            xv = xv.reshape(xv.shape[0], xv.shape[1]*xv.shape[2])
-
-            G = torch.mm(xq, xk.transpose(0, 1)/xk.shape[1]**0.5)
-            softmax = nn.Softmax(dim=-1)
-            G = softmax(G)
-            G = torch.mm(G, xv)
-
-            # Transductive Mask transformed input
-            G = G.reshape(-1, x.shape[2], x.shape[3])
-            x = x * G
-            f = nn.Flatten()(x)
-
-        # print(torch.mean(f, dim=1, keepdim=False).size())
-        # print("Befor Normalization: {}".format(torch.isnan(f).any()))
-        # print("Befor Normalization: {}".format(not torch.isfinite(f).any()))
 
         # mean normalization
         f = f[:, :, None, None]  # unflatten resnet output
@@ -320,6 +273,14 @@ def evaluate_fewshot(
                     visualize_optimal_transport(prototypes_before, prototypes, cur_qry_f,
                                                 cur_sup_y[::n_shot], cur_qry_y, "umap", idx+1, n_shot, save_path=args.save_path, n_way=n_way, n_query=n_query)
 
+                # if acc_ot - acc > 0.2:
+                #     print(
+                #         "------------------- Episode {} ---------------\n".format(idx+1))
+                #     print("Acc before: {}".format(acc))
+                #     print("Acc before: {}".format(acc_ot))
+                #     visualize_optimal_transport(prototypes_before, prototypes, cur_qry_f,
+                #                                 cur_sup_y[::n_shot], cur_qry_y, "tsne", idx+1, n_shot, save_path=args.save_path, n_way=n_way, n_query=n_query)
+
                 accs[f'{n_shot}-shot'].append(acc)
                 accs_ot[f'{n_shot}-shot'].append(acc_ot)
 
@@ -336,11 +297,11 @@ def evaluate_fewshot(
         std_ot = acc_ot.std()
         c95_ot = 1.96*std_ot/math.sqrt(acc_ot.shape[0])
 
-        print('classifier: {}, power_norm: {}, {}-way {}-shot acc: {:.2f}+{:.2f}'.format(
-            classifier, power_norm, n_way, n_shot, mean*100, c95*100))
+        print('classifier: {}, {}-way {}-shot acc: {:.2f}+{:.2f}'.format(
+            classifier, n_way, n_shot, mean*100, c95*100))
 
-        print('classifier: {}, power_norm: {}, {}-way {}-shot acc: {:.2f}+{:.2f}'.format(
-            classifier, power_norm, n_way, n_shot, mean_ot*100, c95_ot*100))
+        print('classifier: {}, {}-way {}-shot acc: {:.2f}+{:.2f}'.format(
+            classifier, n_way, n_shot, mean_ot*100, c95_ot*100))
         print("------------------------------------------------------\n")
         results_shot.append(mean_ot*100)
         results_shot.append(c95_ot*100)
@@ -359,6 +320,31 @@ def evaluate_imagenet(args):
     test_loader = build_fewshot_loader(args, 'test')
 
     student, teacher = build_student_teacher(args)
+    ##########################################################################################################
+    # memory_size = (40 * 200 //
+    #                (256 * 2) + 1) * 256 * 2 + 1
+
+    # params_groups = get_params_groups(student)
+    # optimizer = torch.optim.SGD(
+    #     params_groups, lr=0, momentum=0.9)  # lr is set by scheduler
+    # fp16_scaler = None
+    # teacher_nn_replacer = NNmemoryBankModule(
+    #     size=memory_size, origin="teacher")
+    # student_nn_replacer = NNmemoryBankModule(
+    #     size=memory_size, origin="student")
+    # student_f_nn_replacer = NNmemoryBankModule(
+    #     size=memory_size, origin="student_f")
+
+    # print("Memory Size: {}".format(memory_size))
+
+    # student, teacher, optimizer, fp16_scaler, start_epoch, loss, batch_size = load_student_teacher(
+    #     student, teacher, args.eval_path, teacher_nn_replacer,
+    #     student_nn_replacer, student_f_nn_replacer, optimizer=optimizer,
+    #     fp16_scaler=fp16_scaler)
+
+    # visualize_memory(teacher_nn_replacer, args.save_path, "teacher")
+    # exit()
+    ###############################
 
     if args.eval_path is not None:
 
@@ -375,14 +361,12 @@ def evaluate_imagenet(args):
         else:
             model = teacher
 
-        feature_extractor = model.module.feature_extractor if "feature_extractor" in model.named_buffers() else None
-
         if args.fine_tune:
             finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[1, 5],
-                             n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+                             n_query=args.n_query, classifier='LR')
         else:
             evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
-                1, 5], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+                1, 5], n_query=args.n_query, classifier='LR')
 
             if "deit" in args.backbone:
                 student.module.encoder.masked_im_modeling = True
@@ -417,14 +401,12 @@ def evaluate_cub(args):
         else:
             model = teacher
 
-        feature_extractor = model.module.feature_extractor if "feature_extractor" in model.named_buffers() else None
-
         if args.fine_tune:
             finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[5, 20],
-                             n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+                             n_query=args.n_query, classifier='LR')
         else:
             evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
-                5, 20], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+                5, 20], n_query=args.n_query, classifier='LR')
 
             if "deit" in args.backbone:
                 student.module.encoder.masked_im_modeling = True
@@ -496,17 +478,15 @@ def evaluate_cdfsl(args):
         else:
             model = teacher
 
-        feature_extractor = model.module.feature_extractor if "feature_extractor" in model.named_buffers() else None
-
         # evaluate all datasets of the cd-fsl benchmark
         for idx, (loader_name, test_loader) in enumerate(test_loaders):
             print("---------- {} ------------".format(loader_name))
             if args.fine_tune:
                 finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[5, 20],
-                                 n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+                                 n_query=args.n_query, classifier='LR')
             else:
                 evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
-                    5, 20], n_query=args.n_query, classifier='LR', power_norm=True, feature_extractor=feature_extractor)
+                    5, 20], n_query=args.n_query, classifier='LR')
 
             if "deit" in args.backbone:
                 student.module.encoder.masked_im_modeling = True
