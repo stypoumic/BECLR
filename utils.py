@@ -208,7 +208,7 @@ def build_cub_fewshot_loader(args, n_shot=5, download=False, mode='test'):
     return tasks
 
 
-def build_fewshot_loader(args, mode='test'):
+def build_fewshot_loader(args, mode='test', max_n_shot=5):
 
     assert mode in ['train', 'val', 'test']
 
@@ -241,7 +241,7 @@ def build_fewshot_loader(args, mode='test'):
         raise ValueError(args.dataset)
 
     test_sampler = EpisodeSampler(
-        test_dataset.labels, args.n_test_task//args.test_batch_size, args.n_way, 5+args.n_query, args.test_batch_size)
+        test_dataset.labels, args.n_test_task//args.test_batch_size, args.n_way, max_n_shot+args.n_query, args.test_batch_size)
     test_loader = torch.utils.data.DataLoader(
         test_dataset, batch_sampler=test_sampler, shuffle=False, drop_last=False, pin_memory=True, num_workers=args.num_workers)
 

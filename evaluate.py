@@ -229,6 +229,9 @@ def evaluate_fewshot(
                 # (n_way * n_query) x D
                 cur_qry_f = qry_f[tb]
                 cur_qry_y = qry_label
+                if idx == 0 and tb == 0:
+                    print(
+                        "Total {}-shot Support Features: {}".format(n_shot, cur_sup_f.shape))
 
                 prototypes_before = groupedAvg(cur_sup_f, n_shot)
 
@@ -313,11 +316,12 @@ def evaluate_imagenet(args):
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
+    n_shots = [1, 5]
 
     if args.fine_tune:
         args.test_batch_size = 1
 
-    test_loader = build_fewshot_loader(args, 'test')
+    test_loader = build_fewshot_loader(args, 'test', max_n_shot=max(n_shots))
 
     student, teacher = build_student_teacher(args)
     ##########################################################################################################
@@ -362,11 +366,11 @@ def evaluate_imagenet(args):
             model = teacher
 
         if args.fine_tune:
-            finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[1, 5],
+            finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=n_shots,
                              n_query=args.n_query, classifier='LR')
         else:
-            evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
-                1, 5], n_query=args.n_query, classifier='LR')
+            evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way,
+                             n_shots=n_shots, n_query=args.n_query, classifier='LR')
 
             if "deit" in args.backbone:
                 student.module.encoder.masked_im_modeling = True
@@ -377,12 +381,13 @@ def evaluate_cub(args):
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
+    n_shots = [5, 20]
 
     if args.fine_tune:
         args.test_batch_size = 1
 
     test_loader = build_cub_fewshot_loader(
-        args, n_shot=20, download=False, mode='test')
+        args, n_shot=max(n_shots), download=False, mode='test')
 
     student, teacher = build_student_teacher(args)
 
@@ -402,11 +407,11 @@ def evaluate_cub(args):
             model = teacher
 
         if args.fine_tune:
-            finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[5, 20],
+            finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=n_shots,
                              n_query=args.n_query, classifier='LR')
         else:
-            evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
-                5, 20], n_query=args.n_query, classifier='LR')
+            evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way,
+                             n_shots=n_shots, n_query=args.n_query, classifier='LR')
 
             if "deit" in args.backbone:
                 student.module.encoder.masked_im_modeling = True
@@ -417,6 +422,7 @@ def evaluate_cdfsl(args):
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
+    n_shots = [5, 20]
 
     #####################################################
     # few_shot_params = dict(n_way = args.n_way , n_support = params.n_test_shot)
@@ -427,7 +433,7 @@ def evaluate_cdfsl(args):
         loader_name = "ChestX"
         print("Loading {}".format(loader_name))
         datamgr = Chest_few_shot.SetDataManager(Path(args.data_path) / Path("chestX"),
-                                                args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+                                                args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
         chest_loader = datamgr.get_data_loader(aug=False)
 
         test_loaders.append((loader_name, chest_loader))
@@ -436,7 +442,7 @@ def evaluate_cdfsl(args):
         loader_name = "ISIC"
         print("Loading {}".format(loader_name))
         datamgr = ISIC_few_shot.SetDataManager(Path(args.data_path) / Path("ISIC"),
-                                               args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+                                               args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
         isic_loader = datamgr.get_data_loader(aug=False)
 
         test_loaders.append((loader_name, isic_loader))
@@ -445,7 +451,7 @@ def evaluate_cdfsl(args):
         loader_name = "EuroSAT"
         print("Loading {}".format(loader_name))
         datamgr = EuroSAT_few_shot.SetDataManager(Path(args.data_path) / Path("EuroSAT/2750"),
-                                                  args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+                                                  args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
         eurosat_loader = datamgr.get_data_loader(aug=False)
 
         test_loaders.append((loader_name, eurosat_loader))
@@ -454,7 +460,7 @@ def evaluate_cdfsl(args):
         loader_name = "CropDisease"
         print("Loading {}".format(loader_name))
         datamgr = CropDisease_few_shot.SetDataManager(Path(args.data_path) / Path("plant-disease"),
-                                                      args.size, n_eposide=args.n_test_task, n_support=20, n_query=args.n_query)
+                                                      args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
         cropdis_loader = datamgr.get_data_loader(aug=False)
 
         test_loaders.append((loader_name, cropdis_loader))
@@ -482,11 +488,11 @@ def evaluate_cdfsl(args):
         for idx, (loader_name, test_loader) in enumerate(test_loaders):
             print("---------- {} ------------".format(loader_name))
             if args.fine_tune:
-                finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[5, 20],
+                finetune_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=n_shots,
                                  n_query=args.n_query, classifier='LR')
             else:
-                evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way, n_shots=[
-                    5, 20], n_query=args.n_query, classifier='LR')
+                evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way,
+                                 n_shots=n_shots, n_query=args.n_query, classifier='LR')
 
             if "deit" in args.backbone:
                 student.module.encoder.masked_im_modeling = True
