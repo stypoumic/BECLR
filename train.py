@@ -500,47 +500,44 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
                 images, masks, args.patch_size)
 
         with torch.cuda.amp.autocast(fp16_scaler is not None):
-            if 'deit' in args.backbone:
-                pass
+            # pass images from student/teacher encoders
+            p, z_student = student(masked_images)
+            z_teacher = teacher(images)
+
+            # concat the features of top-k neighbors for both student &
+            # teacher if batch size increase is activated
+            if args.enhance_batch:
+                if args.use_single_memory:
+                    z_teacher = student_f_nn_replacer.get_top_kNN(
+                        z_teacher.detach(), epoch, args, k=args.topk, update=True)
+                    p = student_nn_replacer.get_top_kNN(
+                        p, epoch, args, k=args.topk, update=True)
+                    z_student = student_f_nn_replacer.get_top_kNN(
+                        z_student, epoch, args, k=args.topk, update=True)
+                else:
+                    z_teacher = teacher_nn_replacer.get_top_kNN(
+                        z_teacher.detach(), epoch, args, k=args.topk, update=True)
+                    p = student_nn_replacer.get_top_kNN(
+                        p, epoch, args, k=args.topk, update=True)
+                    z_student = student_f_nn_replacer.get_top_kNN(
+                        z_student, epoch, args, k=args.topk, update=True)
+
+            # calculate contrastive loss
+            loss_state = beclr_loss(
+                z_teacher, p, z_student, args, epoch=epoch,
+                memory=student_nn_replacer.bank.cuda())
+
+            # calculate clustering loss (if enabled)
+            if args.cl_use_teacher:
+                cluster_memory_module = teacher_nn_replacer
             else:
-                # pass images from student/teacher encoders
-                p, z_student = student(masked_images)
-                z_teacher = teacher(images)
-
-                # concat the features of top-k neighbors for both student &
-                # teacher if batch size increase is activated
-                if args.enhance_batch:
-                    if args.use_single_memory:
-                        z_teacher = student_f_nn_replacer.get_top_kNN(
-                            z_teacher.detach(), epoch, args, k=args.topk, update=True)
-                        p = student_nn_replacer.get_top_kNN(
-                            p, epoch, args, k=args.topk, update=True)
-                        z_student = student_f_nn_replacer.get_top_kNN(
-                            z_student, epoch, args, k=args.topk, update=True)
-                    else:
-                        z_teacher = teacher_nn_replacer.get_top_kNN(
-                            z_teacher.detach(), epoch, args, k=args.topk, update=True)
-                        p = student_nn_replacer.get_top_kNN(
-                            p, epoch, args, k=args.topk, update=True)
-                        z_student = student_f_nn_replacer.get_top_kNN(
-                            z_student, epoch, args, k=args.topk, update=True)
-
-                # calculate contrastive loss
-                loss_state = beclr_loss(
-                    z_teacher, p, z_student, args, epoch=epoch,
-                    memory=student_nn_replacer.bank.cuda())
-
-                # calculate clustering loss (if enabled)
-                if args.cl_use_teacher:
-                    cluster_memory_module = teacher_nn_replacer
-                else:
-                    cluster_memory_module = student_nn_replacer
-                if args.use_clustering_loss and epoch > args.cluster_loss_start_epoch \
-                        and cluster_memory_module.start_clustering:
-                    cl_loss = cluster_loss(
-                        args, p, z_teacher, cluster_memory_module)
-                else:
-                    cl_loss = 0
+                cluster_memory_module = student_nn_replacer
+            if args.use_clustering_loss and epoch > args.cluster_loss_start_epoch \
+                    and cluster_memory_module.start_clustering:
+                cl_loss = cluster_loss(
+                    args, p, z_teacher, cluster_memory_module)
+            else:
+                cl_loss = 0
 
         loss = loss_state['loss'] + args.w_clustering * cl_loss
 
