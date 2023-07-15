@@ -184,9 +184,6 @@ def args_parser():
     parser.add_argument('--cluster_loss_start_epoch', default=100, type=int,
                         help=' Epoch after which the clustering loss is \
                         activated.')
-    parser.add_argument('--cl_use_teacher', default=True, type=bool_flag,
-                        help="Whether to use the teacher or student memory \
-                            for the cluster loss")
 
     # few-shot evaluation settings
     parser.add_argument('--n_way', type=int, default=5,
@@ -212,9 +209,9 @@ def args_parser():
                         and should not be passed as argument""")
     parser.add_argument("--local_rank", default=0, type=int,
                         help="this argument is not used and should be ignored")
-    # TO REMOVE
-    parser.add_argument('--use_sinnkhorn_ver2', default=False, type=bool_flag,
-                        help="asas")
+
+    parser.add_argument('--eucl_norm', default=True, type=bool_flag,
+                        help="Whether normalize before applying eucl distance")
 
     return parser
 
@@ -528,14 +525,10 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
                 memory=student_nn_replacer.bank.cuda())
 
             # calculate clustering loss (if enabled)
-            if args.cl_use_teacher:
-                cluster_memory_module = teacher_nn_replacer
-            else:
-                cluster_memory_module = student_nn_replacer
             if args.use_clustering_loss and epoch > args.cluster_loss_start_epoch \
-                    and cluster_memory_module.start_clustering:
+                    and teacher_nn_replacer.start_clustering:
                 cl_loss = cluster_loss(
-                    args, p, z_teacher, cluster_memory_module)
+                    args, p, z_teacher, teacher_nn_replacer)
             else:
                 cl_loss = 0
 
