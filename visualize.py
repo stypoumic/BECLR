@@ -271,7 +271,7 @@ def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_qu
     ax.set(xticklabels=[])
     ax.tick_params(bottom=False)
     plt.savefig(Path(save_path) / Path(proj+"_ep"+str(episode) +
-                "_"+str(n_shot)+"-shot_after.jpeg"), dpi=1000)
+                "_"+str(n_shot)+"-shot_after.jpeg"), dpi=300)
 #######################
     plt.clf()
     ax2 = sns.kdeplot(x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
@@ -295,7 +295,7 @@ def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_qu
     # ax1.set(xticklabels=[])
     # ax1.tick_params(bottom=False)
     # plt.savefig(Path(save_path) / Path(proj+"_ep"+str(episode) +
-    #             "_"+str(n_shot)+"-shot_before.jpeg"), dpi=1000)
+    #             "_"+str(n_shot)+"-shot_before.jpeg"), dpi=300)
 
     # ax2 = sns.relplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1], hue=df['class'][n_way:].astype(
     #     int), palette="Dark2", style=df['set'][n_way:].astype(int), s=df['set'][n_way:]*150+50, legend=False, facet_kws=dict(despine=False))
@@ -304,5 +304,5 @@ def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_qu
     # ax2.set(xticklabels=[])
     # ax2.tick_params(bottom=False)
     # plt.savefig(Path(save_path) / Path(proj+"_ep"+str(episode) +
-    #             "_"+str(n_shot)+"-shot_after.jpeg"), dpi=1000)
+    #             "_"+str(n_shot)+"-shot_after.jpeg"), dpi=300)
     return

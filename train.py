@@ -71,7 +71,7 @@ def args_parser():
                         teacher""")
     parser.add_argument('--out_dim', default=512, type=int,
                         help="""Dimensionality of output.""")
-    parser.add_argument('--momentum_teacher', default=0.996, type=float,
+    parser.add_argument('--momentum_teacher', default=0.9, type=float,
                         help="""Base EMA parameter for teacher update. The value
                         is increased to 1 during training with cosine schedule.""")
     parser.add_argument('--freeze_last_layer', default=1, type=int,
@@ -97,7 +97,7 @@ def args_parser():
                         above this threshold, they are treated as positives, \
                         and masked out from the uniformity loss""")
     parser.add_argument('--use_only_batch_neg', default=False, type=bool_flag,
-                        help="Whether to use memory in uniformity loss")
+                        help="use only original batch in uniformtiy")
 
     # memory settings
     parser.add_argument("--memory_scale", default=20, type=int,
@@ -108,7 +108,7 @@ def args_parser():
     parser.add_argument('--cluster_algo', type=str, default='kmeans',
                         choices=['kmeans'], help='Choice of clustering algorithm\
                         for initializing the memory clusters')
-    parser.add_argument('--recluster', default=False, type=bool_flag,
+    parser.add_argument('--recluster', default=True, type=bool_flag,
                         help="""Wether to occasionally recluster the memory \
                         embeddings all together""")
     parser.add_argument('--cluster_freq', type=int,

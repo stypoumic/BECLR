@@ -137,7 +137,6 @@ class ClusterLoss(nn.Module):
     def cross_entropy(self, x1, x2):
         # return -torch.mean(torch.sum(x1 * F.log_softmax(x2, dim=1), dim=1))
         return -torch.mean(torch.sum(x1 * torch.log(x2), dim=1))
-        # return -torch.mean(torch.sum(x1 * x2, dim=1))
 
     def forward(self, args, p, z, memory):
         # get cluster prototypes
