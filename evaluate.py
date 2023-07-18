@@ -168,7 +168,7 @@ def finetune_fewshot(
 
 @torch.no_grad()
 def evaluate_fewshot(
-        args, encoder, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', visualize_OT=False):
+        args, encoder, loader, n_way=5, n_shots=[1, 5], n_query=15, classifier='LR', one_shot_ot_passes=5, visualize_OT=False):
 
     encoder.eval()
     accs = {}
@@ -235,15 +235,18 @@ def evaluate_fewshot(
 
                 prototypes_before = groupedAvg(cur_sup_f, n_shot)
 
-                ##################
+                # initilize Opttimal Transport module
                 transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
                                                          stopping_criterion=1e-4)
+                ot_passes = one_shot_ot_passes if n_shot == 1 else 1
+                prototypes = prototypes_before
+                ##################
+                for i in range(ot_passes):
+                    prototypes, cur_qry_f = transportation_module(
+                        torch.from_numpy(prototypes), torch.from_numpy(cur_qry_f))
 
-                prototypes, cur_qry_f = transportation_module(
-                    torch.from_numpy(prototypes_before), torch.from_numpy(cur_qry_f))
-
-                prototypes = prototypes.detach().cpu().numpy()
-                cur_qry_f = cur_qry_f.detach().cpu().numpy()
+                    prototypes = prototypes.detach().cpu().numpy()
+                    cur_qry_f = cur_qry_f.detach().cpu().numpy()
                 ##################
 
                 if classifier == 'LR':
@@ -381,7 +384,7 @@ def evaluate_cub(args):
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
-    n_shots = [5, 20]
+    n_shots = [1, 5]
 
     if args.fine_tune:
         args.test_batch_size = 1
