@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from lightly.loss.memory_bank import MemoryBankModule
 from sklearn import cluster
 from torchmetrics.functional import pairwise_euclidean_distance
-from sinkhorn import distributed_sinkhorn, sinkhorn2
+from sinkhorn import distributed_sinkhorn
 
 from visualize import visualize_memory, visualize_memory_batch
 
@@ -155,22 +155,20 @@ class NNmemoryBankModule(MemoryBankModule):
             # create cost matrix between batch embeddings & cluster centers
             Q = torch.einsum("nd,md->nm", z_normed, centers_normed)  # BS x K
         else:
-            # Normalize batch & memory embeddings
-            z_normed = torch.nn.functional.normalize(z, dim=1)  # BS x D
-            centers_normed = torch.nn.functional.normalize(
-                centers, dim=1).cuda()  # K x D
-            # create cost matrix between batch embeddings & cluster centers
-            Q = pairwise_euclidean_distance(z_normed, centers_normed)
-
-            # create cost matrix between batch embeddings & cluster centers
-            # Q = pairwise_euclidean_distance(z, centers.cuda())
+            if args.eucl_norm:
+                # Normalize batch & memory embeddings
+                z_normed = torch.nn.functional.normalize(z, dim=1)  # BS x D
+                centers_normed = torch.nn.functional.normalize(
+                    centers, dim=1).cuda()  # K x D
+                # create cost matrix between batch embeddings & cluster centers
+                Q = pairwise_euclidean_distance(z_normed, centers_normed)
+            else:
+                # create cost matrix between batch embeddings & cluster centers
+                Q = pairwise_euclidean_distance(z, centers.cuda())
 
         # apply optimal transport between batch embeddings and cluster centers
-        if args.use_sinnkhorn_ver2:
-            Q = sinkhorn2(z_normed, centers_normed, eps=args.epsilon)
-        else:
-            Q = distributed_sinkhorn(
-                Q, args.epsilon, args.sinkhorn_iterations)  # BS x K
+        Q = distributed_sinkhorn(
+            Q, args.epsilon, args.sinkhorn_iterations)  # BS x K
 
         # get assignments (batch labels)
         batch_labels = torch.argmax(Q, dim=1)
