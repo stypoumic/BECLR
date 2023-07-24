@@ -77,14 +77,14 @@ def visualize_memory_batch(batch_features, batch_labels, centers, save_path, pro
                            top_clusters[i], "Class"] = selected_labels[0]
     # keep only topk clsuters from memory prototypes
 
-    # df_centers = pd.concat([df_centers, df_centers, df_centers, df_centers,
-    #                        df_centers, df_centers, df_centers, df_centers,
-    #                        df_centers, df_centers, df_centers, df_centers,
-    #                        df_centers, df_centers, df_centers, df_centers,
-    #                        df_centers, df_centers, df_centers, df_centers,
-    #                        df_centers, df_centers, df_centers, df_centers,
-    #                        df_centers, df_centers, df_centers, df_centers,
-    #                        df_centers, df_centers, df_centers, df_centers])
+    df_centers = pd.concat([df_centers, df_centers, df_centers, df_centers,
+                           df_centers, df_centers, df_centers, df_centers,
+                           df_centers, df_centers, df_centers, df_centers,
+                           df_centers, df_centers, df_centers, df_centers,
+                           df_centers, df_centers, df_centers, df_centers,
+                           df_centers, df_centers, df_centers, df_centers,
+                           df_centers, df_centers, df_centers, df_centers,
+                           df_centers, df_centers, df_centers, df_centers])
     df = pd.concat([df_batch, df_centers])
     df = df.reset_index(drop=True)
     features = df.iloc[:, :-2]
@@ -117,7 +117,7 @@ def visualize_memory_batch(batch_features, batch_labels, centers, save_path, pro
     sns.set_context("paper")
     sns.set_style("darkgrid")
     ax = sns.relplot(x=proj_2d[:, 0], y=proj_2d[:, 1], hue=df['Class'], palette=[
-                     "C0", "C1", "C2", "C7"], style=df['Embedding Origin'], s=140+50*(1-df['Size']), legend=True, facet_kws=dict(despine=False), markers=["*", "d"])
+                     "C0", "C1", "C2", "C7"], style=df['Embedding Origin'], s=140+50*(1-df['Size']), legend=True, facet_kws=dict(despine=False), markers=[".", "*"])
     ax.set(yticklabels=[])
     ax.tick_params(left=False)
     ax.set(xticklabels=[])
@@ -128,11 +128,13 @@ def visualize_memory_batch(batch_features, batch_labels, centers, save_path, pro
     return
 
 
-def visualize_memory(memory_bank, save_path, origin, n_class=25, n_samples=40, proj="umap", epoch=0):
+def visualize_memory(memory_bank, save_path, origin, n_class=25, n_samples=30, proj="umap", epoch=0):
     print("==> Visualizing Memory Embeddings...")
     print(memory_bank.labels.unique(return_counts=True)[-1])
     unique_label_counts = np.array(
         memory_bank.labels.unique(return_counts=True)[-1].cpu())
+    unique_labels = np.array(
+        memory_bank.labels.unique(return_counts=True)[0].cpu())
     if len(unique_label_counts) <= 1:
         print("Error with memory configuration")
         return
@@ -143,12 +145,9 @@ def visualize_memory(memory_bank, save_path, origin, n_class=25, n_samples=40, p
     df_memory_bank = pd.DataFrame(bank)
     df_memory_bank['class'] = pd.Series(labels)
 
-    # all classes
-    unique_labels = np.arange(unique_label_counts.shape[0])
-
     # discard classes with fewer than n_samples assgined to them
-    discarded_labels = [idx for idx, val in enumerate(
-        unique_label_counts) if val <= n_samples]
+    discarded_labels = unique_labels[[idx for idx, val in enumerate(
+        unique_label_counts) if val <= n_samples]]
     print("Discarded: {}".format(np.sort(discarded_labels)))
     discarded_indices = np.argwhere(np.isin(unique_labels, discarded_labels))
     unique_labels = np.delete(unique_labels, discarded_indices)
@@ -165,6 +164,7 @@ def visualize_memory(memory_bank, save_path, origin, n_class=25, n_samples=40, p
     # keep only samples from selected claasses
     df_memory_bank = df_memory_bank[~df_memory_bank['class'].isin(
         discarded_labels)]
+    # keep only n_samples per class for visualization purposes
     df_memory_bank = df_memory_bank[df_memory_bank['class'].isin(
         unique_labels)]
 
@@ -194,21 +194,21 @@ def visualize_memory(memory_bank, save_path, origin, n_class=25, n_samples=40, p
     if n_class == 25:
         # adjust marker sizes in default 25-class visualization setting
         sizes = np.repeat(
-            np.array([120, 120, 120, 120, 120, 160, 120, 160, 120, 140, 120, 140, 120, 150, 120, 120, 120, 120, 120, 160, 120, 160, 120, 140, 120]), n_samples)
+            np.array([200, 200, 200, 200, 200, 270, 200, 270, 200, 230, 200, 230, 200, 245, 200, 200, 200, 200, 200, 270, 200, 270, 200, 230, 200]), n_samples)
         df_memory_bank['size'] = pd.Series(sizes)
     else:
-        sizes = 120
+        sizes = 240
 
     sns.set_context("paper")
-    sns.set_style("darkgrid")
+    sns.set_style("ticks")
     ax = sns.relplot(x=proj_2d[:, 0], y=proj_2d[:, 1], hue=df_memory_bank['class'].astype(
         int), palette="Dark2", style=df_memory_bank['class'].astype(int), s=sizes, legend=False, facet_kws=dict(despine=False))
     # ax = sns.kdeplot(x=proj_2d[:, 0], y=proj_2d[:, 1],
-    #                  hue=df_memory_bank['class'].astype(int), palette="Pastel2", legend=False)
+    #                  hue=df_memory_bank['class'].astype(int), palette="Dark2", legend=False, fill=True)
     ax.set(yticklabels=[])
-    ax.tick_params(left=False)
+    # ax.tick_params(left=False)
     ax.set(xticklabels=[])
-    ax.tick_params(bottom=False)
+    # ax.tick_params(bottom=False)
 
     save_path = Path(save_path) / Path("memory_visualizations") / Path(origin)
     save_path.mkdir(parents=True, exist_ok=True)
@@ -218,7 +218,6 @@ def visualize_memory(memory_bank, save_path, origin, n_class=25, n_samples=40, p
     return
 
 
-@torch.no_grad()
 def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_query,
                                 y_support, y_query, proj, episode, n_shot, save_path,
                                 n_way=5, n_query=15):
@@ -258,13 +257,14 @@ def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_qu
     proj_2d_sup_after = proj_2d[-n_way:]
 
     sns.set_context("paper")
-    sns.set_style("dark")
+    # white, dark, ticks
+    sns.set_style("white")
     ax = sns.kdeplot(x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
                      hue=df['class'][n_way:-n_way].astype(int), palette="Pastel2", legend=False)
     ax = sns.scatterplot(data=proj_2d_query, x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
-                         hue=df['class'][n_way:-n_way].astype(int), s=70, style=df['set'][n_way:-n_way].astype(int), palette="Dark2", markers=["."], legend=False)
+                         hue=df['class'][n_way:-n_way].astype(int), s=130, style=df['set'][n_way:-n_way].astype(int), palette="Dark2", markers=["."], legend=False)
     ax = sns.scatterplot(data=proj_2d_sup_after, x=proj_2d_sup_after[:, 0], y=proj_2d_sup_after[:, 1],
-                         hue=df['class'][-n_way:].astype(int), s=300, style=df['set'][-n_way:].astype(int), palette="Dark2", markers=["*"], legend=False)
+                         hue=df['class'][-n_way:].astype(int), s=800, style=df['set'][-n_way:].astype(int), palette="Dark2", markers=["*"], legend=False)
 
     ax.set(yticklabels=[])
     ax.tick_params(left=False)
@@ -277,9 +277,9 @@ def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_qu
     ax2 = sns.kdeplot(x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
                       hue=df['class'][n_way:-n_way].astype(int), palette="Pastel2", legend=False)
     ax2 = sns.scatterplot(data=proj_2d_query, x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
-                          hue=df['class'][n_way:-n_way].astype(int), s=70, style=df['set'][n_way:-n_way].astype(int), palette="Dark2", markers=["."], legend=False)
+                          hue=df['class'][n_way:-n_way].astype(int), s=130, style=df['set'][n_way:-n_way].astype(int), palette="Dark2", markers=["."], legend=False)
     ax2 = sns.scatterplot(data=proj_2d_sup_before, x=proj_2d_sup_before[:, 0], y=proj_2d_sup_before[:, 1],
-                          hue=df['class'][:n_way].astype(int), s=300, style=df['set'][:n_way].astype(int), palette="Dark2", markers=["*"], legend=False)
+                          hue=df['class'][:n_way].astype(int), s=800, style=df['set'][:n_way].astype(int), palette="Dark2", markers=["*"], legend=False)
     ax2.set(yticklabels=[])
     ax2.tick_params(left=False)
     ax2.set(xticklabels=[])
@@ -288,21 +288,4 @@ def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_qu
                 "_"+str(n_shot)+"-shot_before.jpeg"), dpi=300)
     plt.clf()
 
-    # ax1 = sns.relplot(x=proj_2d_before[:, 0], y=proj_2d_before[:, 1], hue=df['class'][:-n_way].astype(
-    #     int), palette="Dark2", style=df['set'][:-n_way].astype(int), s=df['set'][:-n_way]*150+50, legend=False, facet_kws=dict(despine=False))
-    # ax1.set(yticklabels=[])
-    # ax1.tick_params(left=False)
-    # ax1.set(xticklabels=[])
-    # ax1.tick_params(bottom=False)
-    # plt.savefig(Path(save_path) / Path(proj+"_ep"+str(episode) +
-    #             "_"+str(n_shot)+"-shot_before.jpeg"), dpi=300)
-
-    # ax2 = sns.relplot(x=proj_2d_after[:, 0], y=proj_2d_after[:, 1], hue=df['class'][n_way:].astype(
-    #     int), palette="Dark2", style=df['set'][n_way:].astype(int), s=df['set'][n_way:]*150+50, legend=False, facet_kws=dict(despine=False))
-    # ax2.set(yticklabels=[])
-    # ax2.tick_params(left=False)
-    # ax2.set(xticklabels=[])
-    # ax2.tick_params(bottom=False)
-    # plt.savefig(Path(save_path) / Path(proj+"_ep"+str(episode) +
-    #             "_"+str(n_shot)+"-shot_after.jpeg"), dpi=300)
     return
