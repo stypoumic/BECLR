@@ -218,6 +218,104 @@ def visualize_memory(memory_bank, save_path, origin, n_class=25, n_samples=30, p
     return
 
 
+@torch.no_grad()
+def visualize_multiple_passes_ot(orginal_prototypes, first_pass_prototypes, transported_prototypes, z_query,
+                                 y_support, y_query, proj, episode, n_shot, save_path,
+                                 n_way=5, n_query=15, n_pass=5):
+    df_sup_before = pd.DataFrame(orginal_prototypes)
+    df_sup_before['class'] = pd.Series(y_support)
+    df_sup_before['set'] = pd.Series(np.ones(len(df_sup_before.index)))
+
+    df_sup_afterfp = pd.DataFrame(first_pass_prototypes)
+    df_sup_afterfp['class'] = pd.Series(y_support)
+    df_sup_afterfp['set'] = pd.Series(np.ones(len(df_sup_afterfp.index)))
+
+    df_sup_after = pd.DataFrame(transported_prototypes)
+    df_sup_after['class'] = pd.Series(y_support)
+    df_sup_after['set'] = pd.Series(np.ones(len(df_sup_after.index)))
+
+    df_quer = pd.DataFrame(z_query)
+    df_quer['class'] = pd.Series(y_query)
+    df_quer['set'] = pd.Series(np.zeros(len(df_quer.index)))
+
+    df = pd.concat([df_sup_before, df_quer, df_sup_afterfp, df_sup_after])
+    df = df.reset_index(drop=True)
+    features = df.iloc[:, :-2]
+
+    if proj == "tsne":
+        tsne = TSNE(n_components=2, verbose=0, perplexity=5)
+        proj_2d = tsne.fit_transform(features)
+    else:
+        umap = UMAP(n_components=2, init='random', random_state=0)
+        proj_2d = umap.fit_transform(features)
+
+    proj_2d_before = proj_2d[:-2*n_way, :]
+    proj_2d_afterfp = proj_2d[n_way:-n_way, :]
+    proj_2d_after = np.concatenate(
+        [proj_2d[n_way:-2*n_way, :], proj_2d[-n_way:, :]])
+
+    print("Set DBI score before: {}".format(
+        davies_bouldin_score(proj_2d_before, df['set'][:-2*n_way])))
+    print("Set DBI score after first pass: {}".format(
+        davies_bouldin_score(proj_2d_afterfp, df['set'][n_way:-n_way])))
+    print("Set DBI score after last pass: {}".format(
+        davies_bouldin_score(proj_2d_after, pd.concat([df['set'][n_way:-2*n_way], df['set'][-n_way:]]))))
+    ##############
+    proj_2d_query = proj_2d[n_way:-2*n_way, :]
+    proj_2d_sup_before = proj_2d[:n_way]
+    proj_2d_sup_afterfp = proj_2d[-2*n_way:-n_way]
+    proj_2d_sup_after = proj_2d[-n_way:]
+
+    sns.set_context("paper")
+    # white, dark, ticks
+    sns.set_style("white")
+    ax = sns.kdeplot(x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
+                     hue=df['class'][n_way:-2*n_way].astype(int), palette="Pastel2", legend=False)
+    ax = sns.scatterplot(data=proj_2d_query, x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
+                         hue=df['class'][n_way:-2*n_way].astype(int), s=130, style=df['set'][n_way:-2*n_way].astype(int), palette="Dark2", markers=["."], legend=False)
+    ax = sns.scatterplot(data=proj_2d_sup_afterfp, x=proj_2d_sup_afterfp[:, 0], y=proj_2d_sup_afterfp[:, 1],
+                         hue=df['class'][-2*n_way:-n_way].astype(int), s=800, style=df['set'][-2*n_way:-n_way].astype(int), palette="Dark2", markers=["*"], legend=False)
+
+    ax.set(yticklabels=[])
+    ax.tick_params(left=False)
+    ax.set(xticklabels=[])
+    ax.tick_params(bottom=False)
+    plt.savefig(Path(save_path) / Path(proj+"_ep"+str(episode) +
+                "_"+str(n_shot)+"-shot_after_first_pass.jpeg"), dpi=300)
+#######################
+    plt.clf()
+    ax1 = sns.kdeplot(x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
+                      hue=df['class'][n_way:-2*n_way].astype(int), palette="Pastel2", legend=False)
+    ax1 = sns.scatterplot(data=proj_2d_query, x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
+                          hue=df['class'][n_way:-2*n_way].astype(int), s=130, style=df['set'][n_way:-2*n_way].astype(int), palette="Dark2", markers=["."], legend=False)
+    ax1 = sns.scatterplot(data=proj_2d_sup_after, x=proj_2d_sup_after[:, 0], y=proj_2d_sup_after[:, 1],
+                          hue=df['class'][-n_way:].astype(int), s=800, style=df['set'][-n_way:].astype(int), palette="Dark2", markers=["*"], legend=False)
+
+    ax1.set(yticklabels=[])
+    ax1.tick_params(left=False)
+    ax1.set(xticklabels=[])
+    ax1.tick_params(bottom=False)
+    plt.savefig(Path(save_path) / Path(proj+"_ep"+str(episode) +
+                "_"+str(n_shot)+"-shot_after_last_pass.jpeg"), dpi=300)
+#######################
+    plt.clf()
+    ax2 = sns.kdeplot(x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
+                      hue=df['class'][n_way:-2*n_way].astype(int), palette="Pastel2", legend=False)
+    ax2 = sns.scatterplot(data=proj_2d_query, x=proj_2d_query[:, 0], y=proj_2d_query[:, 1],
+                          hue=df['class'][n_way:-2*n_way].astype(int), s=130, style=df['set'][n_way:-2*n_way].astype(int), palette="Dark2", markers=["."], legend=False)
+    ax2 = sns.scatterplot(data=proj_2d_sup_before, x=proj_2d_sup_before[:, 0], y=proj_2d_sup_before[:, 1],
+                          hue=df['class'][:n_way].astype(int), s=800, style=df['set'][:n_way].astype(int), palette="Dark2", markers=["*"], legend=False)
+    ax2.set(yticklabels=[])
+    ax2.tick_params(left=False)
+    ax2.set(xticklabels=[])
+    ax2.tick_params(bottom=False)
+    plt.savefig(Path(save_path) / Path(proj+"_ep"+str(episode) +
+                "_"+str(n_shot)+"-shot_before.jpeg"), dpi=300)
+    plt.clf()
+
+    return
+
+
 def visualize_optimal_transport(orginal_prototypes, transported_prototypes, z_query,
                                 y_support, y_query, proj, episode, n_shot, save_path,
                                 n_way=5, n_query=15):
