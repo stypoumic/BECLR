@@ -1,2 +1,2 @@
-# msiam
-MSiam
+# BECLR
+Batch Enhanced Contrastive Learning
