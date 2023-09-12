@@ -58,7 +58,7 @@ class NNmemoryBankModule(MemoryBankModule):
         self.topk1 = 1
         self.topk2 = 1
         self.origin = origin
-        # self.idx = 0            # TO REMOVE
+        self.idx = 0            # TO REMOVE
 
     def load_memory_bank(self, memory_bank: tuple):
         self.bank = memory_bank[0]
@@ -214,6 +214,37 @@ class NNmemoryBankModule(MemoryBankModule):
 
         return z, bank.T
 
+    def get_NN(self,
+               output: torch.Tensor,
+               epoch: int,
+               args,
+               update: bool = False):
+
+        bsz = output.shape[0]
+
+        # Add latest batch to the memory queue
+        output, bank = super(NNmemoryBankModule, self).forward(
+            output, None, update)
+        bank = bank.to(output.device).t()
+
+        # only return the nearest neighbor features instead of the originals,
+        # in case the NNCLR start epoch has passed
+        if epoch >= args.memory_start_epoch:
+            # Normalize batch & memory embeddings
+            output_normed = torch.nn.functional.normalize(output, dim=1)
+            bank_normed = torch.nn.functional.normalize(bank, dim=1)
+
+            # create similarity matrix between batch & memory embeddings
+            similarity_matrix = torch.einsum(
+                "nd,md->nm", output_normed, bank_normed)
+
+            # find nearest-neighbor for each batch embedding
+            index_nearest_neighbours = torch.argmax(similarity_matrix, dim=1)
+            output = torch.index_select(
+                bank, dim=0, index=index_nearest_neighbours)
+
+        return output
+
     def get_top_kNN(self,
                     output: torch.Tensor,
                     epoch: int,
@@ -242,6 +273,12 @@ class NNmemoryBankModule(MemoryBankModule):
                 output, bank = self.add_memory_embdeddings_OT(
                     args, output, dist_metric=args.memory_dist_metric, momentum=args.memory_momentum)
                 use_clustering = True if args.use_cluster_select else False
+                # # Visualize memory embeddings using UMAP
+                # if self.origin == "teacher" or self.origin == "student":
+                #     visualize_memory(self, args.save_path,
+                #                      self.origin, epoch=epoch, n_samples=args.memory_scale)
+                # if self.origin == "student":
+                #     exit()
             else:
                 # Add latest batch to the memory queue (update memory only from both view)
                 output, bank = super(NNmemoryBankModule, self).forward(
@@ -323,7 +360,7 @@ class NNmemoryBankModule(MemoryBankModule):
                     z_center_similarity_matrix_2, self.topk2, dim=1)
 
                 ##############################################################################################################
-                # # # # TO REMOVE
+                # # TO REMOVE
                 # if self.origin == "teacher" or self.origin == "student":
                 #     visualize_memory_batch(
                 #         z1, test_batch_labels, centers, "C:/GitHub/msiam/visualizations", proj="umap", origin=self.origin, idx=self.idx)
