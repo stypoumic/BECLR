@@ -2,7 +2,6 @@ import os
 from PIL import Image
 from torch.utils.data import Dataset
 import pickle
-import csv
 
 
 class FC100(Dataset):

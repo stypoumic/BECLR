@@ -2,8 +2,6 @@ import os
 from PIL import Image
 from torch.utils.data import Dataset
 import pickle
-from matplotlib import cm
-import numpy as np
 
 
 class CIFAR_FS(Dataset):

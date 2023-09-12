@@ -1,23 +1,10 @@
 import os
-import io
-import json
-import pickle
 import tarfile
-import shutil
-import zipfile
-import requests
 from PIL import Image
-from collections import defaultdict
-
-import numpy as np
-import scipy.io
-import torch
-import torchvision
-from torchvision.datasets import ImageFolder
 from torchvision.datasets.folder import default_loader
 from learn2learn.data.utils import (download_file,
                                     download_file_from_google_drive)
-from torch.utils.data import ConcatDataset, Dataset
+from torch.utils.data import Dataset
 
 
 ## CUB Meta-Data ##
