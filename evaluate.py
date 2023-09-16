@@ -24,7 +24,7 @@ from supervised_finetuning import (supervised_finetuning,
 from utils import (bool_flag, build_cub_fewshot_loader, build_fewshot_loader,
                    build_student_teacher, fix_random_seeds, get_params_groups,
                    init_distributed_mode, load_student_teacher)
-from visualize import visualize_memory, visualize_optimal_transport
+from visualize import visualize_memory, visualize_optimal_transport, visualize_multiple_passes_ot
 
 
 def args_parser():
@@ -39,7 +39,7 @@ def args_parser():
                         default=None, help='path for saving visualizations')
     parser.add_argument('--dataset', type=str, default='miniImageNet',
                         choices=['tieredImageNet',
-                                 'miniImageNet', 'cub', 'cdfsl'],
+                                 'miniImageNet', 'cub', 'cdfsl', 'CIFAR-FS', 'FC100'],
                         help='choice of dataset for pre-training')
     parser.add_argument('--num_workers', type=int,
                         default=1, help='num of workers to use')
@@ -80,6 +80,8 @@ def args_parser():
                         default=5, help='episode_batch_size')
     parser.add_argument('--use_student', default=True, type=bool_flag,
                         help='whether to use student or teacher encoder for eval')
+    parser.add_argument('--one_shot_ot_passes', type=int,
+                        default=5, help='number of OpT-ALN passes in 1-shot case')
 
     # supervised finetuning settings
     parser.add_argument('--fine_tune', default=False, type=bool_flag,
@@ -220,7 +222,6 @@ def evaluate_fewshot(
         # -- Fit Logistic Regression Classifier
         for tb in range(test_batch_size):
             for n_shot in n_shots:
-
                 # (n_way * n_shot) x D
                 cur_sup_f = sup_f[tb, :, :n_shot, :].reshape(
                     n_way*n_shot, -1).detach().cpu().numpy()
@@ -238,16 +239,24 @@ def evaluate_fewshot(
                 # initilize Opttimal Transport module
                 transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
                                                          stopping_criterion=1e-4)
-                ot_passes = one_shot_ot_passes if n_shot == 1 else 1
+                ot_passes = one_shot_ot_passes if n_shot == 1 else 2
                 prototypes = prototypes_before
                 ##################
                 for i in range(ot_passes):
                     prototypes, cur_qry_f = transportation_module(
                         torch.from_numpy(prototypes), torch.from_numpy(cur_qry_f))
 
+                    if i == 0:
+                        first_pass_prototypes = prototypes
+
                     prototypes = prototypes.detach().cpu().numpy()
                     cur_qry_f = cur_qry_f.detach().cpu().numpy()
-                ##################
+
+                if n_shot == 5:
+                    ratio = 0.7
+                    prototypes = prototypes * ratio + \
+                        prototypes_before * (1 - ratio)
+                #################
 
                 if classifier == 'LR':
                     clf = LogisticRegression(penalty='l2',
@@ -262,6 +271,12 @@ def evaluate_fewshot(
                                                 solver='lbfgs',
                                                 max_iter=1000,
                                                 multi_class='multinomial')
+                    # clf_fp = LogisticRegression(penalty='l2',
+                    #                             random_state=0,
+                    #                             C=1.0,
+                    #                             solver='lbfgs',
+                    #                             max_iter=1000,
+                    #                             multi_class='multinomial')
                 elif classifier == 'SVM':
                     clf = LinearSVC(C=1.0)
                     clf_ot = LinearSVC(C=1.0)
@@ -274,18 +289,26 @@ def evaluate_fewshot(
 
                 acc = metrics.accuracy_score(cur_qry_y, cur_qry_pred)
                 acc_ot = metrics.accuracy_score(cur_qry_y, cur_qry_pred_ot)
+                ###########
+                # clf_fp.fit(first_pass_prototypes, cur_sup_y[::n_shot])
+                # cur_qry_pred_fp = clf_fp.predict(cur_qry_f)
+                # acc_fp = metrics.accuracy_score(cur_qry_y, cur_qry_pred_fp)
+                ##########
 
                 if visualize_OT:
                     visualize_optimal_transport(prototypes_before, prototypes, cur_qry_f,
-                                                cur_sup_y[::n_shot], cur_qry_y, "umap", idx+1, n_shot, save_path=args.save_path, n_way=n_way, n_query=n_query)
+                                                cur_sup_y[::n_shot], cur_qry_y, "tsne", idx+1, n_shot, save_path=args.save_path, n_way=n_way, n_query=n_query)
 
-                # if acc_ot - acc > 0.2:
+                # if acc_fp - acc > 0.2:
+                #     # if idx + 1 in [1, 275]:
                 #     print(
                 #         "------------------- Episode {} ---------------\n".format(idx+1))
                 #     print("Acc before: {}".format(acc))
-                #     print("Acc before: {}".format(acc_ot))
-                #     visualize_optimal_transport(prototypes_before, prototypes, cur_qry_f,
-                #                                 cur_sup_y[::n_shot], cur_qry_y, "tsne", idx+1, n_shot, save_path=args.save_path, n_way=n_way, n_query=n_query)
+                #     print("Acc after 1 pass: {}".format(acc_fp))
+                #     print("Acc after 5 passes: {}".format(acc_ot))
+                #     visualize_multiple_passes_ot(prototypes_before, first_pass_prototypes, prototypes, cur_qry_f,
+                #                                  cur_sup_y[::n_shot], cur_qry_y, "tsne", idx+1, n_shot,
+                #                                  save_path=args.save_path, n_way=n_way, n_query=n_query)
 
                 accs[f'{n_shot}-shot'].append(acc)
                 accs_ot[f'{n_shot}-shot'].append(acc_ot)
@@ -349,9 +372,10 @@ def evaluate_imagenet(args):
     #     student_nn_replacer, student_f_nn_replacer, optimizer=optimizer,
     #     fp16_scaler=fp16_scaler)
 
-    # visualize_memory(teacher_nn_replacer, args.save_path, "teacher")
+    # visualize_memory(teacher_nn_replacer, args.save_path,
+    #                  "teacher", proj="umap")
     # exit()
-    ###############################
+    # ###############################
 
     if args.eval_path is not None:
 
@@ -359,9 +383,6 @@ def evaluate_imagenet(args):
                                 ['student'], strict=True)
         teacher.load_state_dict(torch.load(args.eval_path)
                                 ['teacher'], strict=True)
-
-        if "deit" in args.backbone:
-            student.module.encoder.masked_im_modeling = False
 
         if args.use_student:
             model = student
@@ -373,10 +394,7 @@ def evaluate_imagenet(args):
                              n_query=args.n_query, classifier='LR')
         else:
             evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way,
-                             n_shots=n_shots, n_query=args.n_query, classifier='LR')
-
-            if "deit" in args.backbone:
-                student.module.encoder.masked_im_modeling = True
+                             n_shots=n_shots, n_query=args.n_query, one_shot_ot_passes=args.one_shot_ot_passes, classifier='LR')
         return
 
 
@@ -401,9 +419,6 @@ def evaluate_cub(args):
         teacher.load_state_dict(torch.load(args.eval_path)
                                 ['teacher'], strict=True)
 
-        if "deit" in args.backbone:
-            student.module.encoder.masked_im_modeling = False
-
         if args.use_student:
             model = student
         else:
@@ -414,10 +429,7 @@ def evaluate_cub(args):
                              n_query=args.n_query, classifier='LR')
         else:
             evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way,
-                             n_shots=n_shots, n_query=args.n_query, classifier='LR')
-
-            if "deit" in args.backbone:
-                student.module.encoder.masked_im_modeling = True
+                             n_shots=n_shots, n_query=args.n_query, one_shot_ot_passes=args.one_shot_ot_passes, classifier='LR')
         return
 
 
@@ -450,23 +462,23 @@ def evaluate_cdfsl(args):
 
         test_loaders.append((loader_name, isic_loader))
 
-    if args.cd_fsl == "all" or args.cd_fsl == "eurosat":
-        loader_name = "EuroSAT"
-        print("Loading {}".format(loader_name))
-        datamgr = EuroSAT_few_shot.SetDataManager(Path(args.data_path) / Path("EuroSAT/2750"),
-                                                  args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
-        eurosat_loader = datamgr.get_data_loader(aug=False)
+    # if args.cd_fsl == "all" or args.cd_fsl == "eurosat":
+    #     loader_name = "EuroSAT"
+    #     print("Loading {}".format(loader_name))
+    #     datamgr = EuroSAT_few_shot.SetDataManager(Path(args.data_path) / Path("EuroSAT/2750"),
+    #                                               args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
+    #     eurosat_loader = datamgr.get_data_loader(aug=False)
 
-        test_loaders.append((loader_name, eurosat_loader))
+    #     test_loaders.append((loader_name, eurosat_loader))
 
-    if args.cd_fsl == "all" or args.cd_fsl == "crop":
-        loader_name = "CropDisease"
-        print("Loading {}".format(loader_name))
-        datamgr = CropDisease_few_shot.SetDataManager(Path(args.data_path) / Path("plant-disease"),
-                                                      args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
-        cropdis_loader = datamgr.get_data_loader(aug=False)
+    # if args.cd_fsl == "all" or args.cd_fsl == "crop":
+    #     loader_name = "CropDisease"
+    #     print("Loading {}".format(loader_name))
+    #     datamgr = CropDisease_few_shot.SetDataManager(Path(args.data_path) / Path("plant-disease"),
+    #                                                   args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
+    #     cropdis_loader = datamgr.get_data_loader(aug=False)
 
-        test_loaders.append((loader_name, cropdis_loader))
+    #     test_loaders.append((loader_name, cropdis_loader))
 
     ####################################################
 
@@ -478,9 +490,6 @@ def evaluate_cdfsl(args):
                                 ['student'], strict=True)
         teacher.load_state_dict(torch.load(args.eval_path)
                                 ['teacher'], strict=True)
-
-        if "deit" in args.backbone:
-            student.module.encoder.masked_im_modeling = False
 
         if args.use_student:
             model = student
@@ -495,10 +504,7 @@ def evaluate_cdfsl(args):
                                  n_query=args.n_query, classifier='LR')
             else:
                 evaluate_fewshot(args, model.module.encoder, test_loader, n_way=args.n_way,
-                                 n_shots=n_shots, n_query=args.n_query, classifier='LR')
-
-            if "deit" in args.backbone:
-                student.module.encoder.masked_im_modeling = True
+                                 n_shots=n_shots, n_query=args.n_query, one_shot_ot_passes=args.one_shot_ot_passes, classifier='LR')
         return
 
 
@@ -514,9 +520,9 @@ if __name__ == '__main__':
     init_distributed_mode(args)
     fix_random_seeds(args.seed)
 
-    if args.dataset == "tieredImageNet" or args.dataset == "miniImageNet":
-        evaluate_imagenet(args)
-    elif args.dataset == "cub":
+    if args.dataset == "cub":
         evaluate_cub(args)
-    else:
+    elif args.dataset == "cdfsl":
         evaluate_cdfsl(args)
+    else:
+        evaluate_imagenet(args)
