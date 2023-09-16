@@ -24,9 +24,9 @@ from utils import (LARS, AverageMeter, apply_mask_resnet, bool_flag,
                    cancel_gradients_last_layer, cosine_scheduler,
                    fix_random_seeds, get_params_groups, get_world_size,
                    grad_logger, init_distributed_mode, load_student_teacher,
-                   save_student_teacher)
+                   save_student_teacher, build_train_loader)
 
-torch.cuda.empty_cache()
+# torch.cuda.empty_cache()
 
 
 def args_parser():
@@ -40,7 +40,8 @@ def args_parser():
     parser.add_argument('--data_path', type=str,
                         default=None, help='path to dataset root')
     parser.add_argument('--dataset', type=str, default='miniImageNet',
-                        choices=['tieredImageNet', 'miniImageNet'],
+                        choices=['tieredImageNet', 'miniImageNet',
+                                 'CIFAR-FS', 'FC100'],
                         help='choice of dataset for pre-training')
     parser.add_argument('--print_freq', type=int,
                         default=120, help='print frequency')
@@ -59,7 +60,7 @@ def args_parser():
                         help='Choice of backbone network for the encoder')
     parser.add_argument('--size', type=int, default=224,
                         help='input image size')
-    parser.add_argument('--enhance_batch', default=True, type=bool_flag,
+    parser.add_argument('--enhance_batch', default=False, type=bool_flag,
                         help="Whether to artificially enhance the batch size")
     parser.add_argument('--topk', default=10, type=int,
                         help='Number of topk NN to extract, when enhancing the \
@@ -213,6 +214,9 @@ def args_parser():
     parser.add_argument('--eucl_norm', default=True, type=bool_flag,
                         help="Whether normalize before applying eucl distance")
 
+    parser.add_argument('--use_nnclr', default=False, type=bool_flag,
+                        help="Whether to use the memory of nnclr")
+
     return parser
 
 
@@ -235,33 +239,36 @@ def train_beclr(args: dict):
     # build data augmentationss
     transform = DataAugmentationBECLR(args)
 
-    if args.dataset == "miniImageNet":
-        data_path = Path(args.data_path) / Path("miniimagenet_train")
-    elif args.dataset == "tieredImageNet":
-        data_path = Path(args.data_path) / Path("tieredimagenet_train")
+    if args.dataset in ["FC100", "CIFAR-FS"]:
+        data_loader = build_train_loader(args, transform)
+    else:
+        if args.dataset == "miniImageNet":
+            data_path = Path(args.data_path) / Path("miniimagenet_train")
+        elif args.dataset == "tieredImageNet":
+            data_path = Path(args.data_path) / Path("tieredimagenet_train")
 
-    pred_size = args.patch_size
-    # build training dataset with patch-level masking
-    dataset = ImageFolderMask(
-        data_path,
-        transform=transform,
-        patch_size=pred_size,
-        pred_ratio=args.mask_ratio,
-        pred_ratio_var=args.mask_ratio_var,
-        pred_aspect_ratio=(0.3, 1/0.3),
-        pred_shape=args.mask_shape,
-        pred_start_epoch=args.mask_start_epoch)
+        pred_size = args.patch_size
+        # build training dataset with patch-level masking
+        dataset = ImageFolderMask(
+            data_path,
+            transform=transform,
+            patch_size=pred_size,
+            pred_ratio=args.mask_ratio,
+            pred_ratio_var=args.mask_ratio_var,
+            pred_aspect_ratio=(0.3, 1/0.3),
+            pred_shape=args.mask_shape,
+            pred_start_epoch=args.mask_start_epoch)
 
-    # build train data loader
-    data_loader = torch.utils.data.DataLoader(
-        dataset,
-        shuffle=True,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=True,
-        drop_last=True
-    )
-    print(f"Data loaded: there are {len(dataset)} images.")
+        # build train data loader
+        data_loader = torch.utils.data.DataLoader(
+            dataset,
+            shuffle=True,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=True,
+            drop_last=True
+        )
+        print(f"Data loaded: there are {len(dataset)} images.")
 
     # ============ building model ... ============
     student, teacher = build_student_teacher(args)
@@ -356,7 +363,8 @@ def train_beclr(args: dict):
     for epoch in tqdm(range(start_epoch, args.epochs)):
         time1 = time.time()
         # data_loader.sampler.set_epoch(epoch)
-        data_loader.dataset.set_epoch(epoch)
+        if args.dataset not in ["FC100", "CIFAR-FS"]:
+            data_loader.dataset.set_epoch(epoch)
 
         # ============ training one epoch of BECLR ... ============
         loss = train_one_epoch(data_loader, student, teacher, optimizer,
@@ -456,9 +464,15 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
 
     end = time.time()
 
-    for it, (images, _, masks) in enumerate(tqdm(train_loader)):
+    # for it, (images, _, masks) in enumerate(tqdm(train_loader)):
+    # for it, (images, _) in enumerate(tqdm(train_loader)):
+    for it, data in enumerate(tqdm(train_loader)):
+        images = data[0]
         data_time.update(time.time() - end)
         bsz = images[0].shape[0]
+
+        if bsz != args.batch_size:
+            continue
 
         # # common params
         names_q, params_q, names_k, params_k = [], [], [], []
@@ -488,13 +502,15 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
         # move images to gpu
         images = torch.cat([images[0], images[1]],
                            dim=0).cuda(non_blocking=True)
-        masks = torch.cat([masks[0], masks[1]],
-                          dim=0).cuda(non_blocking=True)
-
         # Add zero masking on the teacher branch
-        if args.mask_ratio[0] > 0.0:
+        if args.mask_ratio[0] > 0.0 and args.dataset not in ["FC100", "CIFAR-FS"]:
+            masks = data[-1]
+            masks = torch.cat([masks[0], masks[1]],
+                              dim=0).cuda(non_blocking=True)
             masked_images = apply_mask_resnet(
                 images, masks, args.patch_size)
+        else:
+            masked_images = images
 
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             # pass images from student/teacher encoders
@@ -518,6 +534,9 @@ def train_one_epoch(train_loader: torch.utils.data.DataLoader,
                         p, epoch, args, k=args.topk, update=True)
                     z_student = student_f_nn_replacer.get_top_kNN(
                         z_student, epoch, args, k=args.topk, update=True)
+            elif args.use_nnclr:
+                z_teacher = teacher_nn_replacer.get_NN(
+                    z_teacher.detach(), epoch, args, update=True)
 
             # calculate contrastive loss
             loss_state = beclr_loss(

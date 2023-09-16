@@ -14,6 +14,8 @@ from dataset.cub import CUBirds200
 from dataset.miniImageNet import miniImageNet
 from dataset.sampler import EpisodeSampler
 from dataset.tieredImageNet import tieredImageNet
+from dataset.CIFAR_FS import CIFAR_FS
+from dataset.FC100 import FC100
 from models import resnet10, resnet18, resnet34, resnet50
 from models.beclr import BECLR
 
@@ -208,6 +210,28 @@ def build_cub_fewshot_loader(args, n_shot=5, download=False, mode='test'):
     return tasks
 
 
+def build_train_loader(args, transform):
+    if args.dataset == 'CIFAR-FS':
+        train_dataset = CIFAR_FS(
+            data_path=args.data_path,
+            partition='train',
+            transform=transform)
+    elif args.dataset == 'FC100':
+        train_dataset = FC100(
+            data_path=args.data_path,
+            partition='train',
+            transform=transform)
+    else:
+        raise ValueError(args.dataset)
+
+    print(f"Data loaded: there are {len(train_dataset)} images.")
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
+
+    return train_loader
+
+
 def build_fewshot_loader(args, mode='test', max_n_shot=5):
 
     assert mode in ['train', 'val', 'test']
@@ -237,11 +261,26 @@ def build_fewshot_loader(args, mode='test', max_n_shot=5):
             split_path=args.split_path,
             partition=mode,
             transform=test_transform)
+    elif args.dataset == 'CIFAR-FS':
+        test_dataset = CIFAR_FS(
+            data_path=Path(args.data_path),
+            partition=mode,
+            transform=test_transform)
+        _, test_dataset.labels = np.unique(
+            test_dataset.labels, return_inverse=True)
+    elif args.dataset == 'FC100':
+        test_dataset = FC100(
+            data_path=Path(args.data_path),
+            partition=mode,
+            transform=test_transform)
+        _, test_dataset.labels = np.unique(
+            test_dataset.labels, return_inverse=True)
     else:
         raise ValueError(args.dataset)
 
     test_sampler = EpisodeSampler(
         test_dataset.labels, args.n_test_task//args.test_batch_size, args.n_way, max_n_shot+args.n_query, args.test_batch_size)
+
     test_loader = torch.utils.data.DataLoader(
         test_dataset, batch_sampler=test_sampler, shuffle=False, drop_last=False, pin_memory=True, num_workers=args.num_workers)
 
