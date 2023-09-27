@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 from dataset.mask_loader import ImageFolderMask
 from evaluate import evaluate_fewshot
-from memory import DyCE
+from dyce import DyCE
 from model.beclr import BECLRLoss
 from transform.build_transform import DataAugmentationBECLR
 from utils.utils import (LARS, AverageMeter, apply_mask_resnet, bool_flag,
