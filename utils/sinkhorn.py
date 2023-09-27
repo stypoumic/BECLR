@@ -1,3 +1,5 @@
+# This code is adopted and modified from https://github.com/ojss/SAMPTransfer
+
 import torch
 from torch import distributed as dist
 from torch import nn
@@ -9,13 +11,15 @@ class Sinkhorn(nn.Module):
     Given two empirical measures each with :math:`P_1` locations
     :math:`x\in\mathbb{R}^{D_1}` and :math:`P_2` locations :math:`y\in\mathbb{R}^{D_2}`,
     outputs an approximation of the regularized OT cost for point clouds.
-    Args:
-        eps (float): regularization coefficient
-        max_iter (int): maximum number of Sinkhorn iterations
-        reduction (string, optional): Specifies the reduction to apply to the output:
+
+    Arguments:
+        - eps (float): regularization coefficient
+        - max_iter (int): maximum number of Sinkhorn iterations
+        - reduction (string, optional): Specifies the reduction to apply to the output:
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
             'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Default: 'none'
+
     Shape:
         - Input: :math:`(N, P_1, D_1)`, :math:`(N, P_2, D_2)`
         - Output: :math:`(N)` or :math:`()`, depending on `reduction`
@@ -26,7 +30,6 @@ class Sinkhorn(nn.Module):
         self.device = device
         self.eps_parameter = eps_parameter
 
-        # TODO: very dirty: makes the typing of eps unknown, plus it breaks the load_state_dict of OT-less models
         self.eps = eps
         if self.eps_parameter:
             self.eps = nn.Parameter(torch.tensor(self.eps))
