@@ -1,7 +1,9 @@
-from torchvision import transforms
-from PIL import ImageFilter
 import random
+
 import torch.nn.functional as F
+from PIL import ImageFilter
+from torchvision import transforms
+
 
 class GaussianBlur(object):
     """Gaussian blur augmentation in SimCLR https://arxiv.org/abs/2002.05709
@@ -16,15 +18,18 @@ class GaussianBlur(object):
         x = x.filter(ImageFilter.GaussianBlur(radius=sigma))
         return x
 
+
 def get_simCLR_transform(img_shape):
     """Adapted from https://github.com/sthalles/SimCLR/blob/master/data_aug/dataset_wrapper.py"""
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8,
                                           saturation=0.8, hue=0.2)
     data_transforms = transforms.Compose([transforms.RandomResizedCrop(size=img_shape[-2:]),
                                           transforms.RandomHorizontalFlip(),
-                                          transforms.RandomApply([color_jitter], p=0.8),
+                                          transforms.RandomApply(
+                                              [color_jitter], p=0.8),
                                           transforms.RandomGrayscale(p=0.2),
                                           GaussianBlur()])
+
 
 def get_chestX_transform(img_shape):
     color_jitter = transforms.ColorJitter(brightness=0.8, contrast=0.8,
@@ -39,7 +44,7 @@ def get_chestX_transform(img_shape):
                                 shear=10),
         GaussianBlur(sigma=(0, 1.)),
         transforms.ToTensor(),
-        #transforms.Lambda(lambda t: F.dropout(t, p=0.3)),
-        #transforms.RandomErasing()
-        ])
+        # transforms.Lambda(lambda t: F.dropout(t, p=0.3)),
+        # transforms.RandomErasing()
+    ])
     return data_transforms

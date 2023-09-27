@@ -1,14 +1,17 @@
 # This code is modified from https://github.com/facebookresearch/low-shot-shrink-hallucinate
 
-from cdfsl_benchmark.datasets.contrastive_augmentations import get_simCLR_transform, get_chestX_transform
 import sys
+from abc import abstractmethod
+
 import torch
 import torchvision.transforms as transforms
-import cdfsl_benchmark.datasets.additional_transforms as add_transforms
-from abc import abstractmethod
+from PIL import ImageFile
 from torchvision.datasets import ImageFolder
 
-from PIL import ImageFile
+import cdfsl_benchmark.datasets.additional_transforms as add_transforms
+from cdfsl_benchmark.datasets.contrastive_augmentations import (
+    get_chestX_transform, get_simCLR_transform)
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 sys.path.append("../")

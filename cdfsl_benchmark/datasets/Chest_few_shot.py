@@ -1,18 +1,20 @@
 # This code is modified from https://github.com/facebookresearch/low-shot-shrink-hallucinate
 
-from cdfsl_benchmark.datasets.miniImageNet_few_shot import TransformLoader as MiniImTransformLoader
 import sys
-import torch
-from PIL import Image
-import numpy as np
-import pandas as pd
-import torchvision.transforms as transforms
-import cdfsl_benchmark.datasets.additional_transforms as add_transforms
-from torch.utils.data import Dataset
 from abc import abstractmethod
 from pathlib import Path
 
-from PIL import ImageFile
+import numpy as np
+import pandas as pd
+import torch
+import torchvision.transforms as transforms
+from PIL import Image, ImageFile
+from torch.utils.data import Dataset
+
+import cdfsl_benchmark.datasets.additional_transforms as add_transforms
+from cdfsl_benchmark.datasets.miniImageNet_few_shot import \
+    TransformLoader as MiniImTransformLoader
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 sys.path.append("../")
