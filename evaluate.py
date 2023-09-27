@@ -13,8 +13,8 @@ from sklearn.svm import LinearSVC
 from torchvision.transforms.functional import normalize
 from tqdm import tqdm
 
-from cdfsl_benchmark.datasets import (Chest_few_shot, CropDisease_few_shot,
-                                      EuroSAT_few_shot, ISIC_few_shot)
+from dataset.cdfsl_benchmark.datasets import (Chest_few_shot, CropDisease_few_shot,
+                                              EuroSAT_few_shot, ISIC_few_shot)
 from utils.optimal_transport import OpTA
 from utils.utils import (bool_flag, build_cub_fewshot_loader,
                          build_fewshot_loader, build_student_teacher,

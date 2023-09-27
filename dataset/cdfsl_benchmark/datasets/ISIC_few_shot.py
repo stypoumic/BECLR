@@ -1,20 +1,67 @@
 # This code is modified from https://github.com/facebookresearch/low-shot-shrink-hallucinate
 
+from dataset.cdfsl_benchmark.datasets.miniImageNet_few_shot import TransformLoader as MiniImTransformLoader
 import sys
-from abc import abstractmethod
-
 import torch
+from PIL import Image
+import numpy as np
+import pandas as pd
 import torchvision.transforms as transforms
-from PIL import ImageFile
-from torchvision.datasets import ImageFolder
-
 import cdfsl_benchmark.datasets.additional_transforms as add_transforms
-from cdfsl_benchmark.datasets.contrastive_augmentations import (
-    get_chestX_transform, get_simCLR_transform)
+from torch.utils.data import Dataset
+from abc import abstractmethod
+from pathlib import Path
 
+from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 sys.path.append("../")
+
+
+class CustomDatasetFromImages(Dataset):
+    def __init__(self, data_path):
+        """
+        Args:
+            csv_path (string): path to csv file
+            img_path (string): path to the folder where images are
+            transform: pytorch transforms for transforms and tensor conversion
+        """
+        csv_path = str(Path(data_path) / Path(
+            "ISIC2018_Task3_Training_GroundTruth/ISIC2018_Task3_Training_GroundTruth.csv"))
+        image_path = str(Path(data_path) /
+                         Path("ISIC2018_Task3_Training_Input/"))
+        self.img_path = image_path
+        self.csv_path = csv_path
+
+        # Transforms
+        self.to_tensor = transforms.ToTensor()
+        # Read the csv file
+        self.data_info = pd.read_csv(csv_path, skiprows=[0], header=None)
+
+        # First column contains the image paths
+        self.image_name = np.asarray(self.data_info.iloc[:, 0])
+
+        self.labels = np.asarray(self.data_info.iloc[:, 1:])
+        self.labels = (self.labels != 0).argmax(axis=1)
+        # Calculate len
+        self.data_len = len(self.data_info.index)
+
+    def __getitem__(self, index):
+        # Get image name from the pandas df
+        single_image_name = self.image_name[index]
+        # Open image
+        img_as_path = str(Path(self.img_path) /
+                          Path(single_image_name)) + ".jpg"
+        # Transform image to tensor
+        # img_as_tensor = self.to_tensor(img_as_img)
+
+        # Get label(class) of the image based on the cropped pandas column
+        single_image_label = self.labels[index]
+
+        return (img_as_path, single_image_label)
+
+    def __len__(self):
+        return self.data_len
 
 
 def identity(x): return x
@@ -33,6 +80,7 @@ class SimpleDataset:
                  img_size=(224, 224)):
         self.transform = transform
         self.target_transform = target_transform
+
         self.img_size = img_size
         self.original_transform = original_transform
 
@@ -42,10 +90,15 @@ class SimpleDataset:
         self.no_aug_support = no_aug_support
         self.no_aug_query = no_aug_query
 
-        self.dataset = ImageFolder(str(data_path))
+        # Adaptation to unlabelled dataset
+        image_path = str(data_path) + "/ISIC2018_Task3_Training_Input/"
+        with open('unsupervised-track/UNSUPERVISED_ISIC.txt') as f:
+            image_names = f.readlines()
+        self.image_paths = [image_path + n.strip() for n in image_names]
 
     def __getitem__(self, i):
-        data, label = self.dataset[i]
+        # Loading from paths instead of RAM
+        data = Image.open(self.image_paths[i])
 
         view_list = []
 
@@ -66,25 +119,25 @@ class SimpleDataset:
         return torch.cat(view_list)
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.image_paths)
 
 
 class SetDataset:
     def __init__(self, data_path, batch_size, transform):
 
         self.sub_meta = {}
-        self.cl_list = range(64)
+        self.cl_list = range(7)
 
         for cl in self.cl_list:
             self.sub_meta[cl] = []
 
-        d = ImageFolder(str(data_path))
+        d = CustomDatasetFromImages(data_path=data_path)
 
         for i, (data, label) in enumerate(d):
             self.sub_meta[label].append(data)
 
-        for key, item in self.sub_meta.items():
-            print(len(self.sub_meta[key]))
+        # for key, item in self.sub_meta.items():
+        #    print (len(self.sub_meta[key]))
 
         self.sub_dataloader = []
         sub_data_loader_params = dict(batch_size=batch_size,
@@ -113,7 +166,9 @@ class SubDataset:
 
     def __getitem__(self, i):
 
-        img = self.transform(self.sub_meta[i])
+        # Load img from path (less RAM requirement)
+        img = Image.open(self.sub_meta[i])
+        img = self.transform(img)
         target = self.target_transform(self.cl)
         return img, target
 
@@ -148,18 +203,12 @@ class TransformLoader:
         if transform_type == 'ImageJitter':
             method = add_transforms.ImageJitter(self.jitter_param)
             return method
-        elif transform_type == 'SimCLR':
-            method = get_simCLR_transform((self.image_size, self.image_size))
-            return method
-        elif transform_type == 'chestX':
-            method = get_chestX_transform((self.image_size, self.image_size))
-            return method
         method = getattr(transforms, transform_type)
         if transform_type == 'RandomSizedCrop':
             return method(self.image_size)
         elif transform_type == 'CenterCrop':
             return method(self.image_size)
-        elif transform_type == 'Scale':
+        elif transform_type == 'Resize':
             return method([int(self.image_size*1.15), int(self.image_size*1.15)])
         elif transform_type == 'Normalize':
             return method(**self.normalize_param)
@@ -167,15 +216,11 @@ class TransformLoader:
             return method()
 
     def get_composed_transform(self, aug=False):
-        if isinstance(aug, str):
-            transform_list = ['Scale', 'CenterCrop', aug, 'Normalize']
+        if aug:
+            transform_list = ['RandomSizedCrop', 'ImageJitter',
+                              'RandomHorizontalFlip', 'ToTensor', 'Normalize']
         else:
-            if aug:
-                transform_list = ['Scale', 'CenterCrop',
-                                  'SimCLR', 'ToTensor', 'Normalize']
-            else:
-                transform_list = ['Scale', 'CenterCrop',
-                                  'ToTensor', 'Normalize']
+            transform_list = ['Resize', 'CenterCrop', 'ToTensor', 'Normalize']
 
         transform_funcs = [self.parse_transform(x) for x in transform_list]
         transform = transforms.Compose(transform_funcs)
@@ -192,7 +237,7 @@ class SimpleDataManager(DataManager):
     def __init__(self, image_size, batch_size):
         super(SimpleDataManager, self).__init__()
         self.batch_size = batch_size
-        self.trans_loader = TransformLoader(image_size)
+        self.trans_loader = MiniImTransformLoader(image_size)
 
     # parameters that would change on train/val set
     def get_data_loader(self, aug, n_support=1, n_query=1, no_aug_support=False, no_aug_query=False):
@@ -205,7 +250,7 @@ class SimpleDataManager(DataManager):
                                 no_aug_support=no_aug_support, no_aug_query=no_aug_query)
 
         data_loader_params = dict(
-            batch_size=self.batch_size, shuffle=True, num_workers=12, pin_memory=True)
+            batch_size=self.batch_size, shuffle=True, num_workers=8, pin_memory=True)
         data_loader = torch.utils.data.DataLoader(
             dataset, **data_loader_params)
 
@@ -213,8 +258,9 @@ class SimpleDataManager(DataManager):
 
 
 class SetDataManager(DataManager):
-    def __init__(self, image_size, n_way=5, n_support=5, n_query=16, n_eposide=100):
+    def __init__(self, data_path, image_size, n_way=5, n_support=5, n_query=16, n_eposide=100):
         super(SetDataManager, self).__init__()
+        self.data_path = data_path
         self.image_size = image_size
         self.n_way = n_way
         self.batch_size = n_support + n_query
@@ -224,15 +270,25 @@ class SetDataManager(DataManager):
 
     def get_data_loader(self, aug):  # parameters that would change on train/val set
         transform = self.trans_loader.get_composed_transform(aug)
-        dataset = SetDataset(self.batch_size, transform)
+        dataset = SetDataset(self.data_path, self.batch_size, transform)
         sampler = EpisodicBatchSampler(
             len(dataset), self.n_way, self.n_eposide)
         data_loader_params = dict(
-            batch_sampler=sampler,  num_workers=12, pin_memory=True)
+            batch_sampler=sampler,  num_workers=8, pin_memory=True)
         data_loader = torch.utils.data.DataLoader(
             dataset, **data_loader_params)
         return data_loader
 
 
 if __name__ == '__main__':
-    pass
+
+    train_few_shot_params = dict(n_way=5, n_support=5)
+    base_datamgr = SetDataManager(224, n_query=16)
+    base_loader = base_datamgr.get_data_loader(aug=True)
+
+    cnt = 1
+    for i, (x, label) in enumerate(base_loader):
+        if i < cnt:
+            print(label.size())
+        else:
+            break

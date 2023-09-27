@@ -10,7 +10,7 @@ from torchvision.datasets import ImageFolder
 from torchvision.datasets.folder import default_loader
 
 import cdfsl_benchmark.datasets.additional_transforms as add_transforms
-from cdfsl_benchmark.datasets.miniImageNet_few_shot import \
+from dataset.cdfsl_benchmark.datasets.miniImageNet_few_shot import \
     TransformLoader as MiniImTransformLoader
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True

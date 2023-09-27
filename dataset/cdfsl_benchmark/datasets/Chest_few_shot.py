@@ -1,18 +1,86 @@
 # This code is modified from https://github.com/facebookresearch/low-shot-shrink-hallucinate
 
-from torchvision.datasets.folder import default_loader
-from cdfsl_benchmark.datasets.miniImageNet_few_shot import TransformLoader as MiniImTransformLoader
 import sys
+from abc import abstractmethod
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
 import torch
 import torchvision.transforms as transforms
-import cdfsl_benchmark.datasets.additional_transforms as add_transforms
-from abc import abstractmethod
-from torchvision.datasets import ImageFolder
+from PIL import Image, ImageFile
+from torch.utils.data import Dataset
 
-from PIL import ImageFile
+import cdfsl_benchmark.datasets.additional_transforms as add_transforms
+from dataset.cdfsl_benchmark.datasets.miniImageNet_few_shot import \
+    TransformLoader as MiniImTransformLoader
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 sys.path.append("../")
+
+
+class CustomDatasetFromImages(Dataset):
+    def __init__(self, data_path):
+        """
+        Args:
+            csv_path (string): path to csv file
+            img_path (string): path to the folder where images are
+            transform: pytorch transforms for transforms and tensor conversion
+        """
+        csv_path = str(Path(data_path) / Path("Data_Entry_2017.csv"))
+        img_path = str(Path(data_path) / Path("images"))
+        self.img_path = img_path
+        self.csv_path = csv_path
+        self.used_labels = ["Atelectasis", "Cardiomegaly", "Effusion",
+                            "Infiltration", "Mass", "Nodule", "Pneumonia", "Pneumothorax"]
+
+        self.labels_maps = {"Atelectasis": 0, "Cardiomegaly": 1, "Effusion": 2,
+                            "Infiltration": 3, "Mass": 4, "Nodule": 5,  "Pneumothorax": 6}
+
+        labels_set = []
+
+        # Transforms
+        self.to_tensor = transforms.ToTensor()
+        # Read the csv file
+        self.data_info = pd.read_csv(csv_path, skiprows=[0], header=None)
+
+        # First column contains the image paths
+        self.image_name_all = np.asarray(self.data_info.iloc[:, 0])
+        self.labels_all = np.asarray(self.data_info.iloc[:, 1])
+
+        self.image_name = []
+        self.labels = []
+
+        for name, label in zip(self.image_name_all, self.labels_all):
+            label = label.split("|")
+
+            if len(label) == 1 and label[0] != "No Finding" and label[0] != "Pneumonia" and label[0] in self.used_labels:
+                self.labels.append(self.labels_maps[label[0]])
+                self.image_name.append(name)
+
+        self.data_len = len(self.image_name)
+
+        self.image_name = np.asarray(self.image_name)
+        self.labels = np.asarray(self.labels)
+
+    def __getitem__(self, index):
+        # Get image name from the pandas df
+        single_image_name = self.image_name[index]
+
+        # Open image
+        img_as_path = str(Path(self.img_path) / Path(single_image_name))
+
+        # Transform image to tensor
+        # img_as_tensor = self.to_tensor(img_as_img)
+
+        # Get label(class) of the image based on the cropped pandas column
+        single_image_label = self.labels[index]
+
+        return (img_as_path, single_image_label)
+
+    def __len__(self):
+        return self.data_len
 
 
 def identity(x): return x
@@ -42,14 +110,14 @@ class SimpleDataset:
         self.no_aug_query = no_aug_query
 
         # Adaptation to unlabelled dataset
-        image_path = str(data_path) + '/'
-        with open('unsupervised-track/UNSUPERVISED_EUROSAT.txt') as f:
+        image_path = str(data_path)+"/images/"
+        with open('unsupervised-track/UNSUPERVISED_CHESTX.txt') as f:
             image_names = f.readlines()
         self.image_paths = [image_path + n.strip() for n in image_names]
 
     def __getitem__(self, i):
         # Loading from paths instead of RAM
-        data = default_loader(self.image_paths[i])
+        data = Image.open(self.image_paths[i]).convert('RGB')
 
         view_list = []
 
@@ -77,13 +145,12 @@ class SetDataset:
     def __init__(self, data_path, batch_size, transform):
 
         self.sub_meta = {}
-        self.cl_list = range(10)
+        self.cl_list = range(7)
 
         for cl in self.cl_list:
             self.sub_meta[cl] = []
 
-        # Dataset over image paths instead of images
-        d = ImageFolder(data_path, loader=lambda path: path)
+        d = CustomDatasetFromImages(data_path=data_path)
 
         for i, (data, label) in enumerate(d):
             self.sub_meta[label].append(data)
@@ -96,7 +163,9 @@ class SetDataset:
                                       shuffle=True,
                                       num_workers=0,  # use main thread only or may receive multiple batches
                                       pin_memory=False)
+
         for cl in self.cl_list:
+            # print (cl)
             sub_dataset = SubDataset(
                 self.sub_meta[cl], cl, transform=transform)
             self.sub_dataloader.append(torch.utils.data.DataLoader(
@@ -118,8 +187,10 @@ class SubDataset:
 
     def __getitem__(self, i):
 
-        # Load image from path, instead of preloading (saves RAM)
-        img = self.transform(default_loader(self.sub_meta[i]))
+        # Load images from paths (less RAM requirement)
+        img = Image.open(self.sub_meta[i]).resize((256, 256)).convert('RGB')
+        img.load()
+        img = self.transform(img)
         target = self.target_transform(self.cl)
         return img, target
 
@@ -146,6 +217,7 @@ class TransformLoader:
                  normalize_param=dict(mean=[0.485, 0.456, 0.406], std=[
                                       0.229, 0.224, 0.225]),
                  jitter_param=dict(Brightness=0.4, Contrast=0.4, Color=0.4)):
+
         self.image_size = image_size
         self.normalize_param = normalize_param
         self.jitter_param = jitter_param
@@ -155,11 +227,14 @@ class TransformLoader:
             method = add_transforms.ImageJitter(self.jitter_param)
             return method
         method = getattr(transforms, transform_type)
+
         if transform_type == 'RandomSizedCrop':
             return method(self.image_size)
+
         elif transform_type == 'CenterCrop':
             return method(self.image_size)
         elif transform_type == 'Resize':
+
             return method([int(self.image_size*1.15), int(self.image_size*1.15)])
         elif transform_type == 'Normalize':
             return method(**self.normalize_param)
@@ -233,4 +308,6 @@ class SetDataManager(DataManager):
 
 
 if __name__ == '__main__':
-    pass
+
+    base_datamgr = SetDataManager(224, n_query=16, n_support=5)
+    base_loader = base_datamgr.get_data_loader(aug=True)
