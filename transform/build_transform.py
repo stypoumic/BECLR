@@ -1,25 +1,7 @@
-# Licensed under the MIT License
+# This code is adopted and modified from https://github.com/bbbdylan/unisiam
 
-# Copyright (c) 2022 bbbdylan
-
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 import random
+
 from PIL import ImageFilter, ImageOps
 from torchvision import transforms
 
@@ -54,11 +36,10 @@ class Solarization(object):
 
 
 class DataAugmentationBECLR(object):
-    """
-    Data Augmentation class for BECLR
-    """
-
     def __init__(self, args):
+        """
+        Data Augmentation class for BECLR
+        """
         rgb_mean = (0.485, 0.456, 0.406)
         rgb_std = (0.229, 0.224, 0.225)
         ra_params = dict(
@@ -98,7 +79,6 @@ class DataAugmentationBECLR(object):
             # Solarization(0.2),          # could remove
             normalize,
         ])
-
         print('First View Transform: ', self.global_transfo1)
         print('Second View Transform: ', self.global_transfo2)
 
@@ -106,5 +86,4 @@ class DataAugmentationBECLR(object):
         views = []
         views.append(self.global_transfo1(image))
         views.append(self.global_transfo2(image))
-
         return views

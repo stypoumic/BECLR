@@ -1,16 +1,12 @@
-""" AutoAugment and RandAugment
-Implementation adapted from:
-    https://github.com/tensorflow/tpu/blob/master/models/official/efficientnet/autoaugment.py
-Papers: https://arxiv.org/abs/1805.09501, https://arxiv.org/abs/1906.11172, and https://arxiv.org/abs/1909.13719
-Hacked together by Ross Wightman
-"""
-import random
-import math
-import re
-from PIL import Image, ImageOps, ImageEnhance
-import PIL
-import numpy as np
+# This code is adopted and modified from https://github.com/tensorflow/tpu/blob/master/models/official/efficientnet/autoaugment.py
 
+import math
+import random
+import re
+
+import numpy as np
+import PIL
+from PIL import Image, ImageEnhance, ImageOps
 
 _PIL_VER = tuple([int(x) for x in PIL.__version__.split('.')[:2]])
 
