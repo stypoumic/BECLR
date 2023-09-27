@@ -250,9 +250,10 @@ def evaluate_fewshot(args: dict,
         print('Accuracy, {}-way {}-shot: {:.2f}+{:.2f}'.format(
             n_way, n_shot, mean*100, c95*100))
         print("-------------------------------------\n")
-        results_shot.append(acc*100)
+        results_shot.append(mean*100)
         results_shot.append(c95*100)
         results.append(results_shot)
+
     return results
 
 

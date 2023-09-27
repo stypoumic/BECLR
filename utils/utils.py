@@ -357,7 +357,7 @@ def save_student_teacher(args: dict,
     teacher_bank = teacher_memory.bank
     teacher_ptr = teacher_memory.bank_ptr
     teacher_labels = teacher_memory.labels
-    teacher_centers = teacher_memory.centers
+    teacher_centers = teacher_memory.prototypes
     save_state = {
         'student': student.state_dict(),
         'teacher': teacher.state_dict(),
@@ -368,9 +368,9 @@ def save_student_teacher(args: dict,
         'fp16_scaler': fp16_scaler,
         'teacher_memory': (teacher_bank, teacher_ptr, teacher_labels, teacher_centers),
         'student_memory': (student_memory.bank, student_memory.bank_ptr,
-                           student_memory.labels, student_memory.centers),
+                           student_memory.labels, student_memory.prototypes),
         'student_proj_memory': (student_proj_memory.bank, student_proj_memory.bank_ptr,
-                                student_proj_memory.labels, student_proj_memory.centers)
+                                student_proj_memory.labels, student_proj_memory.prototypes)
     }
     torch.save(save_state, save_file)
     del save_state
@@ -456,7 +456,7 @@ def cancel_gradients_last_layer(epoch, model, freeze_last_layer):
 
 
 def apply_mask_resnet(images: torch.Tensor,
-                      masks: torch.Tensor,
+                      mask: torch.Tensor,
                       patch_size: int = 16,
                       patch_stride: int = 16):
     """
@@ -464,7 +464,7 @@ def apply_mask_resnet(images: torch.Tensor,
 
     Arguments:
         - images (torch.Tensor): input batch images
-        - masks (torch.Tensor): input batch image masks (generated from dataloader)
+        - mask (torch.Tensor): input batch image masks (generated from dataloader)
         - patch_size (int): Size of masked patches in pixels (optional)
         - patch_stride (int): Stride of masked patches in pixels (optional)
 
