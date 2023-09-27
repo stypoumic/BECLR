@@ -1,0 +1,34 @@
+{
+    "dataset": "FC100",
+    "data_path": "data/FC100",
+    "save_path": "results/FC100_r18",
+    "backbone": "resnet18",
+    "out_dim": 512,
+    "mask_ratio": [
+        0.15
+    ],
+    "mask_ratio_var": [
+        0.1
+    ],
+    "num_workers": 16,
+    "ckpt_freq": 50,
+    "optimizer": "sgd",
+    "use_fp16": true,
+    "epochs": 400,
+    "lr": 0.3,
+    "weight_decay": 1.0e-04,
+    "weight_decay_end": 0.0001,
+    "batch_size": 256,
+    "enhance_batch": true,
+    "topk": 5,
+    "memory_start_epoch": 60,
+    "num_clusters": 200,
+    "memory_scale": 40,
+    "memory_dist_metric": "euclidean",
+    "cluster_freq": 60,
+    "epsilon": 0.00001,
+    "eucl_norm": true,
+    "momentum_teacher": 0.995,
+    "lamb_neg": 0.1,
+    "uniformity_config": "SS"
+}

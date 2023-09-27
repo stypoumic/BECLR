@@ -1,0 +1,33 @@
+{
+    "dataset": "tieredImageNet",
+    "data_path": "data/imagenet",
+    "save_path": "results/tieredimagenet_r50",
+    "backbone": "resnet50",
+    "out_dim": 512,
+    "mask_ratio": [
+        0.15
+    ],
+    "mask_ratio_var": [
+        0.1
+    ],
+    "num_workers": 16,
+    "ckpt_freq": 20,
+    "optimizer": "sgd",
+    "use_fp16": true,
+    "epochs": 200,
+    "lr": 0.1,
+    "weight_decay": 1.0e-04,
+    "weight_decay_end": 0.0001,
+    "batch_size": 512,
+    "enhance_batch": true,
+    "topk": 3,
+    "memory_start_epoch": 40,
+    "num_clusters": 1200,
+    "memory_scale": 40,
+    "memory_dist_metric": "euclidean",
+    "cluster_freq": 60,
+    "recluster": true,
+    "epsilon": 0.00001,
+    "eucl_norm": true,
+    "momentum_teacher": 0.995
+}

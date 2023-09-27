@@ -1,0 +1,11 @@
+{
+    "dataset": "miniImageNet",
+    "data_path": "data/mini",
+    "eval_path": "model_zoo/mini_r18.pth",
+    "backbone": "resnet18",
+    "out_dim": 512,
+    "num_workers": 8,
+    "n_test_task": 2000,
+    "test_batch_size": 5,
+    "topk": 5
+}
