@@ -5,7 +5,7 @@ from dataset.cdfsl_benchmark.datasets.miniImageNet_few_shot import TransformLoad
 import sys
 import torch
 import torchvision.transforms as transforms
-import cdfsl_benchmark.datasets.additional_transforms as add_transforms
+import dataset.cdfsl_benchmark.datasets.additional_transforms as add_transforms
 from abc import abstractmethod
 from torchvision.datasets import ImageFolder
 

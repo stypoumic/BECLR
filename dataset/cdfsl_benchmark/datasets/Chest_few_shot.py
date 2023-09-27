@@ -11,7 +11,7 @@ import torchvision.transforms as transforms
 from PIL import Image, ImageFile
 from torch.utils.data import Dataset
 
-import cdfsl_benchmark.datasets.additional_transforms as add_transforms
+import dataset.cdfsl_benchmark.datasets.additional_transforms as add_transforms
 from dataset.cdfsl_benchmark.datasets.miniImageNet_few_shot import \
     TransformLoader as MiniImTransformLoader
 

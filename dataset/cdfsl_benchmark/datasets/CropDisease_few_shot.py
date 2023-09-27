@@ -9,7 +9,7 @@ from PIL import ImageFile
 from torchvision.datasets import ImageFolder
 from torchvision.datasets.folder import default_loader
 
-import cdfsl_benchmark.datasets.additional_transforms as add_transforms
+import dataset.cdfsl_benchmark.datasets.additional_transforms as add_transforms
 from dataset.cdfsl_benchmark.datasets.miniImageNet_few_shot import \
     TransformLoader as MiniImTransformLoader
 

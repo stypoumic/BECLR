@@ -8,7 +8,7 @@ import torchvision.transforms as transforms
 from PIL import ImageFile
 from torchvision.datasets import ImageFolder
 
-import cdfsl_benchmark.datasets.additional_transforms as add_transforms
+import dataset.cdfsl_benchmark.datasets.additional_transforms as add_transforms
 from dataset.cdfsl_benchmark.datasets.contrastive_augmentations import (
     get_chestX_transform, get_simCLR_transform)
 

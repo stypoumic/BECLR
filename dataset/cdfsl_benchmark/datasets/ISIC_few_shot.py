@@ -7,7 +7,7 @@ from PIL import Image
 import numpy as np
 import pandas as pd
 import torchvision.transforms as transforms
-import cdfsl_benchmark.datasets.additional_transforms as add_transforms
+import dataset.cdfsl_benchmark.datasets.additional_transforms as add_transforms
 from torch.utils.data import Dataset
 from abc import abstractmethod
 from pathlib import Path
