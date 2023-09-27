@@ -1,10 +1,10 @@
 # Copyright (c) ByteDance, Inc. and its affiliates.
 # All rights reserved.
 
-import random
 import math
-import numpy as np
+import random
 
+import numpy as np
 from torchvision.datasets import ImageFolder
 
 

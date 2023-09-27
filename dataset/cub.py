@@ -1,11 +1,11 @@
 import os
 import tarfile
-from PIL import Image
-from torchvision.datasets.folder import default_loader
+
 from learn2learn.data.utils import (download_file,
                                     download_file_from_google_drive)
+from PIL import Image
 from torch.utils.data import Dataset
-
+from torchvision.datasets.folder import default_loader
 
 ## CUB Meta-Data ##
 SPLITS = {

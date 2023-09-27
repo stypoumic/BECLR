@@ -1,9 +1,10 @@
-from pathlib import Path
-import shutil
 import argparse
-from tqdm import tqdm
 import csv
 import os
+import shutil
+from pathlib import Path
+
+from tqdm import tqdm
 
 
 def args_parser():

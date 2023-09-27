@@ -1,7 +1,8 @@
+import csv
 import os
+
 from PIL import Image
 from torch.utils.data import Dataset
-import csv
 
 
 class miniImageNet(Dataset):
