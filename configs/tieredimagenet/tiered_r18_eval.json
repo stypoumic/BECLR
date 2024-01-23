@@ -1,7 +1,7 @@
 {
     "dataset": "tieredImageNet",
     "data_path": "data/imagenet",
-    "eval_path": "model_zoo/tiered_r18.pth",
+    "eval_path": "PATH_TO_PRETRAINED_MODEL",
     "backbone": "resnet18",
     "out_dim": 512,
     "num_workers": 8,

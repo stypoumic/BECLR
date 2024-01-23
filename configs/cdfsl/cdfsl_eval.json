@@ -1,7 +1,7 @@
 {
     "dataset": "cdfsl",
     "data_path": "data/cdfsl",
-    "eval_path": "model_zoo/mini_r50.pth",
+    "eval_path": "PATH_TO_PRETRAINED_MODEL",
     "backbone": "resnet50",
     "out_dim": 512,
     "num_workers": 8,

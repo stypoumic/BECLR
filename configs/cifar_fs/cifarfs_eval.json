@@ -1,7 +1,7 @@
 {
     "dataset": "CIFAR-FS",
     "data_path": "data/CIFAR-FS",
-    "eval_path": "model_zoo/cifarfs_r18.pth",
+    "eval_path": "PATH_TO_PRETRAINED_MODEL",
     "backbone": "resnet18",
     "out_dim": 512,
     "num_workers": 8,

@@ -13,12 +13,21 @@ from sklearn.svm import LinearSVC
 from torchvision.transforms.functional import normalize
 from tqdm import tqdm
 
-from dataset.cdfsl_benchmark.datasets import (Chest_few_shot, CropDisease_few_shot,
-                                              EuroSAT_few_shot, ISIC_few_shot)
+from dataset.cdfsl_benchmark.datasets import (
+    Chest_few_shot,
+    CropDisease_few_shot,
+    EuroSAT_few_shot,
+    ISIC_few_shot,
+)
 from utils.optimal_transport import OpTA
-from utils.utils import (bool_flag, build_cub_fewshot_loader,
-                         build_fewshot_loader, build_student_teacher,
-                         fix_random_seeds, init_distributed_mode)
+from utils.utils import (
+    bool_flag,
+    build_cub_fewshot_loader,
+    build_fewshot_loader,
+    build_student_teacher,
+    fix_random_seeds,
+    init_distributed_mode,
+)
 from utils.visualize import visualize_optimal_transport
 
 
@@ -329,15 +338,14 @@ def evaluate_cdfsl(args: dict, n_shots: list = [5, 20]):
         - args (dict): parsed keyword evaluation arguments
         - n_shots (list): list of n-shot settings to be evalauated (optional)
     """
-    dataset_names = ["ISIC", "EuroSAT", "CropDisease", "ChestX"]
     test_loaders = []
 
     # build episodic dataloader for each CDFSL dataset
     if args.cd_fsl == "all" or args.cd_fsl == "chestx":
         loader_name = "ChestX"
         print("Loading {}".format(loader_name))
-        datamgr = Chest_few_shot.SetDataManager(Path(args.data_path) / Path("chestX"),
-                                                args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
+        datamgr = Chest_few_shot.SetDataManager(Path(args.data_path) / Path(
+            "chestX"), args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
         chest_loader = datamgr.get_data_loader(aug=False)
 
         test_loaders.append((loader_name, chest_loader))
@@ -345,8 +353,8 @@ def evaluate_cdfsl(args: dict, n_shots: list = [5, 20]):
     if args.cd_fsl == "all" or args.cd_fsl == "isic":
         loader_name = "ISIC"
         print("Loading {}".format(loader_name))
-        datamgr = ISIC_few_shot.SetDataManager(Path(args.data_path) / Path("ISIC"),
-                                               args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
+        datamgr = ISIC_few_shot.SetDataManager(Path(args.data_path) / Path(
+            "ISIC"), args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
         isic_loader = datamgr.get_data_loader(aug=False)
 
         test_loaders.append((loader_name, isic_loader))
@@ -354,8 +362,8 @@ def evaluate_cdfsl(args: dict, n_shots: list = [5, 20]):
     if args.cd_fsl == "all" or args.cd_fsl == "eurosat":
         loader_name = "EuroSAT"
         print("Loading {}".format(loader_name))
-        datamgr = EuroSAT_few_shot.SetDataManager(Path(args.data_path) / Path("EuroSAT/2750"),
-                                                  args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
+        datamgr = EuroSAT_few_shot.SetDataManager(Path(args.data_path) / Path(
+            "EuroSAT/2750"), args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
         eurosat_loader = datamgr.get_data_loader(aug=False)
 
         test_loaders.append((loader_name, eurosat_loader))
@@ -363,8 +371,8 @@ def evaluate_cdfsl(args: dict, n_shots: list = [5, 20]):
     if args.cd_fsl == "all" or args.cd_fsl == "crop":
         loader_name = "CropDisease"
         print("Loading {}".format(loader_name))
-        datamgr = CropDisease_few_shot.SetDataManager(Path(args.data_path) / Path("plant-disease"),
-                                                      args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
+        datamgr = CropDisease_few_shot.SetDataManager(Path(args.data_path) / Path(
+            "plant-disease"), args.size, n_eposide=args.n_test_task, n_support=max(n_shots), n_query=args.n_query)
         cropdis_loader = datamgr.get_data_loader(aug=False)
 
         test_loaders.append((loader_name, cropdis_loader))

@@ -1,7 +1,7 @@
 {
     "dataset": "cub",
     "data_path": "data/CUB_200_2011",
-    "eval_path": "model_zoo/mini_r50.pth",
+    "eval_path": "PATH_TO_PRETRAINED_MODEL.pth",
     "backbone": "resnet50",
     "out_dim": 512,
     "num_workers": 8,

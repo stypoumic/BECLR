@@ -1,6 +1,6 @@
 {
     "dataset": "miniImageNet",
-    "data_path": "data/mini",
+    "data_path": "data/miniimagenet",
     "save_path": "results/miniimagenet_r18",
     "backbone": "resnet18",
     "out_dim": 512,
@@ -14,7 +14,7 @@
     "ckpt_freq": 50,
     "optimizer": "sgd",
     "use_fp16": true,
-    "epochs": 400,
+    "epochs": 2,
     "lr": 0.3,
     "weight_decay": 1.0e-04,
     "weight_decay_end": 0.0001,

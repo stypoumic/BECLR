@@ -20,74 +20,6 @@ from model import resnet10, resnet18, resnet34, resnet50
 from model.beclr import BECLR
 
 
-def init_distributed_mode(args: dict):
-    """
-    Initializes distributed parallel training.
-
-    Arguments:
-        - args (dict): parsed keyword training arguments
-    """
-    # launched with torch.distributed.launch
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        args.rank = int(os.environ["RANK"])
-        args.world_size = int(os.environ['WORLD_SIZE'])
-        args.gpu = int(os.environ['LOCAL_RANK'])
-
-        ############### TO REMOVE #################
-
-        # use gloo backend for local runs on windows
-        dist.init_process_group(
-            backend="gloo",
-            world_size=args.world_size,
-            rank=args.rank,
-        )
-        torch.cuda.set_device(args.gpu)
-        print('| distributed init (rank {}): {}'.format(
-            args.rank, args.dist_url), flush=True)
-        dist.barrier()
-        return
-        ############### TO REMOVE #################
-
-    # launched with submitit on a slurm cluster
-    elif 'SLURM_PROCID' in os.environ:
-        args.rank = int(os.environ['SLURM_PROCID'])
-        args.gpu = args.rank % torch.cuda.device_count()
-
-    elif torch.cuda.is_available():
-        print('Will run the code on one GPU.')
-        args.rank, args.gpu, args.world_size = 0, 0, 1
-        os.environ['MASTER_ADDR'] = '127.0.0.1'
-        os.environ['MASTER_PORT'] = '29500'
-        # use gloo backend for local runs on windows
-        dist.init_process_group(
-            backend="gloo",
-            world_size=args.world_size,
-            rank=args.rank,
-        )
-        torch.cuda.set_device(args.gpu)
-        print('| distributed init (rank {}): {}'.format(
-            args.rank, args.dist_url), flush=True)
-        dist.barrier()
-        return
-    else:
-        print('Does not support training without GPU.')
-        sys.exit(1)
-
-    dist.init_process_group(
-        backend="nccl",
-        init_method=args.dist_url,
-        world_size=args.world_size,
-        rank=args.rank,
-    )
-
-    torch.cuda.set_device(args.gpu)
-    print('| distributed init (rank {}) (gpu {}): {}'.format(
-        args.rank, args.gpu, args.dist_url), flush=True)
-    dist.barrier()
-    # dist.init_process_group(backend="nccl")
-    return
-
-
 class AverageMeter(object):
     """
     Computes and stores the average and current value
@@ -622,3 +554,68 @@ class LARS(torch.optim.Optimizer):
                 mu.mul_(g['momentum']).add_(dp)
 
                 p.add_(mu, alpha=-g['lr'])
+
+
+def init_distributed_mode(args: dict):
+    """
+    Initializes distributed parallel training.
+
+    Arguments:
+        - args (dict): parsed keyword training arguments
+    """
+    # launched with torch.distributed.launch
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        args.rank = int(os.environ["RANK"])
+        args.world_size = int(os.environ['WORLD_SIZE'])
+        args.gpu = int(os.environ['LOCAL_RANK'])
+
+        # use gloo backend for local runs on windows
+        dist.init_process_group(
+            backend="gloo",
+            world_size=args.world_size,
+            rank=args.rank,
+        )
+        torch.cuda.set_device(args.gpu)
+        print('| distributed init (rank {}): {}'.format(
+            args.rank, args.dist_url), flush=True)
+        dist.barrier()
+        return
+
+    # launched with submitit on a slurm cluster
+    elif 'SLURM_PROCID' in os.environ:
+        args.rank = int(os.environ['SLURM_PROCID'])
+        args.gpu = args.rank % torch.cuda.device_count()
+
+    elif torch.cuda.is_available():
+        print('Will run the code on one GPU.')
+        args.rank, args.gpu, args.world_size = 0, 0, 1
+        os.environ['MASTER_ADDR'] = '127.0.0.1'
+        os.environ['MASTER_PORT'] = '29500'
+        # use gloo backend for local runs on windows
+        dist.init_process_group(
+            backend="gloo",
+            world_size=args.world_size,
+            rank=args.rank,
+        )
+        torch.cuda.set_device(args.gpu)
+        print('| distributed init (rank {}): {}'.format(
+            args.rank, args.dist_url), flush=True)
+        dist.barrier()
+        return
+    else:
+        print('Does not support training without GPU.')
+        sys.exit(1)
+
+    dist.init_process_group(
+        backend="nccl",
+        init_method=args.dist_url,
+        world_size=args.world_size,
+        rank=args.rank,
+    )
+
+    torch.cuda.set_device(args.gpu)
+    print('| distributed init (rank {}) (gpu {}): {}'.format(
+        args.rank, args.gpu, args.dist_url), flush=True)
+    dist.barrier()
+    # dist.init_process_group(backend="nccl")
+    return

@@ -1,6 +1,6 @@
 {
     "dataset": "miniImageNet",
-    "data_path": "data/mini",
+    "data_path": "data/miniimagenet",
     "save_path": "results/miniimagenet_r50",
     "backbone": "resnet50",
     "out_dim": 512,
