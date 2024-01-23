@@ -4,15 +4,22 @@
 ## Abstract
 Learning quickly from very few labeled samples is a fundamental attribute that separates machines and humans in the era of deep representation learning. Unsupervised few-shot learning (U-FSL) aspires to bridge this gap by discarding the reliance on annotations at training time. Intrigued by the success of contrastive learning approaches in the realm of U-FSL, we structurally approach their shortcomings in both pretraining and downstream inference stages. We propose a novel Dynamic Clustered mEmory (DyCE) module to promote a highly separable latent representation space for enhancing positive sampling at the pretraining phase and infusing implicit class-level insights into unsupervised contrastive learning. We then tackle the, somehow overlooked yet critical, issue of sample bias at the few-shot inference stage. We propose an iterative Optimal Transport-based distribution Alignment (OpTA) strategy and demonstrate that it efficiently addresses the problem, especially in low-shot scenarios where FSL approaches suffer the most from sample bias. We later on discuss that DyCE and OpTA are two intertwined pieces of a novel end-to-end approach (we coin as BECLR), constructively magnifying each other's impact. We then present a suite of extensive quantitative and qualitative experimentation to corroborate that BECLR sets a new state-of-the-art across ALL existing U-FSL benchmarks (to the best of our knowledge), and significantly outperforms the best of the current baselines, e.g. by up to $14\%$ and $12\%$ in the ($5$-way, $1$-shot) setting on miniImageNet and tieredImageNet, respectively.
 
+<p align="center">
+    <img src="images/beclr.png" width="55%" >
+    <img src="images/dyce.png" width="33%" />
+</p>
 
 ## Key Ideas
 * **Going beyond instance-level contrastive learning.** In unsupervised contrastive FSL approaches each image within the batch and its augmentations correspond to a unique class, which is an unrealistic assumption. The pitfall here is that potential positive samples present within the same batch might then be repelled in the representation space, hampering the overall performance. We argue that infusing a semblance of class (or membership)-level insights into the unsupervised contrastive paradigm is essential. Our key idea to address this is extending the concept of memory queues by introducing inherent membership clusters represented by dynamically updated prototypes, while circumventing the need for large batch sizes. The proposed DyCE module facilitates a more meaningful positive sampling strategy by constructing and dynamically updating separable memory clusters.
 
 * **Addressing inherent sample bias in (U-)FSL.** In Few-Shot learning the base (pretraining) and novel (inference) classes are mutually exclusive classes. This distribution shift poses a significant challenge at inference time for the swift adaptation to the novel classes. This is further aggravated due to access to only a few labeled (a.k.a support) samples within the few-shot task because the support samples are typically not representative of the larger unlabeled (a.k.a query) set. We refer to this phenomenon as sample bias, highlighting that it is overlooked by most (U-)FSL baselines. To address this issue, we introduce our OpTA add-on module within the supervised inference step. OpTA imposes no additional learnable parameters, yet efficiently aligns the representations of the labeled support and the unlabeled query sets, right before the final supervised inference step. We demonstrate that these two novel modules (DyCE and OpTA) are actually intertwined and amplify one another. Combining these two key ideas, we propose an end-to-end U-FSL approach coined as Batch-Enhanced Contrastive LeaRning (BECLR).
 
+
 <p align="center">
-<img src="images/schema.png" width="85%" >
+  <img src="images/opta.png" width="75%" /> 
 </p>
+
+
 
 ## Data Preparation
 **Note**: All urls for downloading the datasets are not affiliated with this work or its authors.
@@ -95,8 +102,10 @@ python -m torch.distributed.launch evaluate.py --cnfg_path "PATH_TO_EVAL_CONFIG.
 ```
 Different configuration `json` files can be found in the \configs directory.
 
-## Contact
-Corresponding author: Stylianos Poulakakis-Daktylidis (<stypoumic@gmail.com>; <s.p.mrpoulakakis-daktylidis@tudelft.nl>)
+## Contact - Corresponding authors
+Stylianos Poulakakis-Daktylidis (<stypoumic@gmail.com>; <s.p.mrpoulakakis-daktylidis@tudelft.nl>) <br>
+Hadi Jamali-Rad (<h.jamalirad@tudelft.nl>)
+
 
 ## Citation
 ```(bibtex)
