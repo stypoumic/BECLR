@@ -18,7 +18,7 @@
     "lr": 0.3,
     "weight_decay": 1.0e-04,
     "weight_decay_end": 0.0001,
-    "batch_size": 32,
+    "batch_size": 256,
     "enhance_batch": true,
     "topk": 5,
     "memory_start_epoch": 60,
