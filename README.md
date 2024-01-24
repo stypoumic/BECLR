@@ -106,5 +106,11 @@ Corresponding author: Stylianos Poulakakis-Daktylidis (<stypoumic@gmail.com>)
 
 ## Citation
 ```(bibtex)
-
+@inproceedings{
+  title={{BECLR}: Batch Enhanced Contrastive Unsupervised Few-Shot Learning},
+  author={Stylianos Poulakakis-Daktylidis and Hadi Jamali-Rad},
+  booktitle={The Twelfth International Conference on Learning Representations},
+  year={2024},
+  url={https://openreview.net/forum?id=k9SVcrmXL8}
+}
 ```
