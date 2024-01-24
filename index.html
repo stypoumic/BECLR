@@ -1,1 +1,236 @@
-<div class="d"></div>
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="BECLR: Batch Enhanced Contrastive Few-Shot Learning">
+    <meta name="author" content="Stylianos Poulakakis-Daktylidis, Hadi Jamali-Rad">
+
+    <title>BECLR: Batch Enhanced Contrastive Few-Shot Learning</title>
+    <!-- Bootstrap core CSS -->
+    <!--link href="bootstrap.min.css" rel="stylesheet"-->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+        integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+
+    <!-- Custom styles for this template -->
+    <link href="offcanvas.css" rel="stylesheet">
+    <link rel="stylesheet" type="text/css" href="src/css/style.css">
+
+</head>
+
+<body>
+
+    <div class="jumbotron jumbotron-fluid">
+        <div class="container"></div>
+        <h2>BECLR: Batch Enhanced Contrastive <br>Few-Shot Learning</h2>
+        <p class="abstract">ICLR 2024 - <b>Spotlight</b> Presentation
+        </p>
+        <hr>
+        <p class="authors">
+            Stylianos Poulakakis-Daktylidis <sup>1</sup>,
+            Hadi Jamali-Rad <sup>1,2</sup>
+            <!-- <a href="https://wjgancn.github.io"> Weijie Gan</a>*<sup>2</sup>, -->
+            <!-- <a href="https://charles-hu.github.io/"> Junhao Hu</a>*<sup>1</sup>,
+            <a href="https://wjgancn.github.io"> Weijie Gan</a>*<sup>2</sup>, -->
+            </br>
+        </p>
+        <p>
+            <a><sup>1</sup>Delft University of Technology (TU Delft), The Netherlands</a></br>
+            <a><sup>2</sup>Shell Global Solutions International B.V., Amsterdam, The Netherlands</a></br>
+        <p>
+
+        <div class="btn-group" role="group" aria-label="Top menu">
+            <a class="btn btn-primary" href="https://openreview.net/forum?id=k9SVcrmXL8">ICLR 2024</a>
+            <a class="btn btn-primary" href="https://openreview.net/forum?id=k9SVcrmXL8">arXiv</a>
+            <a class="btn btn-primary" href="https://github.com/stypoumic/BECLR">Codebase</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="section">
+
+            <br>
+            <h2>Abstract</h2>
+            <hr>
+            <p>
+                Learning quickly from very few labeled samples is a fundamental attribute that separates machines and
+                humans in the era of deep representation learning. Unsupervised few-shot learning (U-FSL) aspires to
+                bridge this gap by discarding the reliance on annotations at training time. Intrigued by the success of
+                contrastive learning approaches in the realm of U-FSL, we structurally approach their shortcomings in
+                both pretraining and downstream inference stages. We propose a novel Dynamic Clustered mEmory (DyCE)
+                module to promote a highly separable latent representation space for enhancing positive sampling at the
+                pretraining phase and infusing implicit class-level insights into unsupervised contrastive learning. We
+                then tackle the, somehow overlooked yet critical, issue of sample bias at the few-shot inference stage.
+                We propose an iterative Optimal Transport-based distribution Alignment (OpTA) strategy and demonstrate
+                that it efficiently addresses the problem, especially in low-shot scenarios where FSL approaches suffer
+                the most from sample bias. We later on discuss that DyCE and OpTA are two intertwined pieces of a novel
+                end-to-end approach (we coin as BECLR), constructively magnifying each other's impact. We then present a
+                suite of extensive quantitative and qualitative experimentation to corroborate that BECLR sets a new
+                state-of-the-art across ALL existing U-FSL benchmarks (to the best of our knowledge), and significantly
+                outperforms the best of the current baselines.
+            </p>
+
+            <div class="section">
+                <hr>
+                <!-- <h2>Unsupervised Few-Shot Learning SoTA</h2> -->
+                <div class="row vspace-top">
+                    <div class="col text-justify">
+                        <p style="margin-top: 100px;"> We demonstrate that BECLR sets a new state-of-the-art in
+                            <b>ALL</b>
+                            established U-FSL benchmarks; e.g. miniImageNet (see Figure), tieredImageNet,
+                            CIFAR-FS, FC100, by a significant margin.
+                        </p>
+                    </div>
+                    <div class="col-sm-6"><img src="images/teaser-bold.jpg" style="width:100%"></div>
+                </div>
+            </div>
+
+
+            <div class="section">
+                <hr>
+                <h2>Going Beyond Instance-Level Contrastive Learning</h2>
+                <div class="row align-items-center">
+                    <div class="row justify-content-center text-justify">
+                        <p>In unsupervised contrastive FSL approaches each image within the batch and its augmentations
+                            correspond to a unique class, which is an unrealistic assumption. The pitfall here is that
+                            potential positive samples present within the same batch might then be repelled in the
+                            representation space, hampering the overall performance. We argue that infusing a semblance
+                            of class-level insights into the unsupervised contrastive paradigm is
+                            essential.</p>
+                        <img src="images/beclr.png" style="width:90%" alt="Banner" class="center">
+                        <p> Overview of the proposed pretraining framework of BECLR. Two augmented
+                            views of the batch images are both passed through a student-teacher
+                            network followed by the DyCE memory module. DyCE dynamically updates and maintains highly
+                            separable
+                            memory partitions, which enable a more meaningful, beyond instance-level, positive sampling
+                            strategy </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <hr>
+                <h2>Dynamic Clustered Memory</h2>
+                <div class="row vspace-top">
+                    <div class="col text-justify">
+                        <p style="margin-top: 75px;"> DyCE consists of two informational paths: (i) the top-k
+                            neighbor selection and batch enhancement path (bottom branch of the Figure), which uses the
+                            current state of the memory and stored prototypes and (ii) the iterative memory updating via
+                            dynamic clustering path (top branch).
+                        </p>
+                    </div>
+                    <div class="col-sm-7"><img src="images/dyce.png" style="width:100%"></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <!-- <h2>Embedding Space Evolution</h2> -->
+                <!-- <hr> -->
+                <div class="row vspace-top">
+                    <div class="col-sm-6"><img src="images/memory_evol.jpg" style="width:100%"></div>
+                    <div class="col text-justify">
+                        <p style="margin-top: 65px;"> As the training progresses there exists a significant improvement
+                            in terms of inter-cluster separation and intra-cluster tightness of the
+                            embedding space stored in DyCE. This highly separable embedding space is used for sampling
+                            additional positive pairs.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <hr>
+                <h2>Adressing Sample Bias</h2>
+                <div class="row align-items-center">
+                    <div class="col justify-content-center text-justify">
+                        <p>
+                            In the supervised inference stage of (U-)FSL we have access
+                            only to a few labeled (a.k.a support) samples within a few-shot episode which are typically
+                            not representative of the larger unlabeled (a.k.a query) set, thus making a swift adaptation
+                            to the novel testing classes challenging. We refer
+                            to this phenomenon as sample bias, highlighting that it is overlooked by most (U-)FSL
+                            baselines.</p>
+                        <img src="images/opta.png" style="width:95%" alt="Banner" class="center">
+                        <p>
+                            Overview of the proposed inference strategy of BECLR. To address sample bias, we
+                            introduce
+                            an iterative distribution alignment add-on module (OpTA) within the
+                            supervised inference stage of U-FSL. OpTA imposes no additional learnable
+                            parameters, yet efficiently employs optimal transport to align the
+                            representations of the labeled support and unlabeled query sets, right before the final
+                            supervised inference step.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <!-- <h2>Distribution Alignment</h2>
+                <hr> -->
+                <div class="row vspace-top">
+                    <div class="col-sm-7"><img src="images/alignment.png" style="width:100%"></div>
+                    <div class="col text-justify">
+                        <p style="margin-top: 60px;">
+                            <!-- The original support prototypes are highly biased and deviate from the latent query
+                            distributions. -->
+                            OpTA pushes the support prototypes much closer to the query distributions (contour
+                            centers), effectively diminishing sample bias, resulting in significantly higher accuracy in
+                            the corresponding episode.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- <div class="section">
+                <h2>Relation between Pretraining & Inference</h2>
+                <hr>
+                <div class="row vspace-top">
+                    <div class="col text-justify">
+                        <p style="margin-top: 60px;"> OpTA offers an increasingly larger boost as the pretraining
+                            accuracy improves.
+                            The key message here is that our proposed pretraining (DyCE) and inference modules (OpTA)
+                            are highly
+                            intertwined, further enhancing the overall performance. This notion sits at the core of the
+                            BECLR design strategy. </p>
+                    </div>
+                    <div class="col-sm-5"><img src="images/relation.jpg" style="width:100%"></div>
+                </div>
+            </div> -->
+
+
+
+            <!-- <div class="section">
+                <h2>Paper</h2>
+                <hr>
+                <div>
+                    <div class="list-group">
+                        <a href="https://arxiv.org/abs/2310.04297" class="list-group-item">
+                            <img src="img/paper.jpg" style="width:100%; margin-right:-20px; margin-top:-10px;">
+                        </a>
+                    </div>
+                </div>
+            </div> -->
+
+            <!-- anonymous2024beclr, -->
+            <div class="section">
+                <hr>
+                <h2>Bibtex</h2>
+                <div class="bibtexsection">
+                    @inproceedings{
+                    title={{BECLR}: Batch Enhanced Contrastive Unsupervised Few-Shot Learning},
+                    author={Stylianos Poulakakis-Daktylidis and Hadi Jamali-Rad},
+                    booktitle={The Twelfth International Conference on Learning Representations},
+                    year={2024},
+                    url={https://openreview.net/forum?id=k9SVcrmXL8}
+                    }
+                </div>
+            </div>
+
+            <hr>
+
+        </div>
+</body>
+
+</html>
