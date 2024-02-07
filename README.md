@@ -1,5 +1,5 @@
 # Codebase of BECLR
-### Official PyTorch Implementation for ["BECLR: Batch Enhanced Contrastive Unsupervised Few-Shot Learning"](https://openreview.net/forum?id=k9SVcrmXL8)<br> (Stylianos Poulakakis-Daktylidis, Hadi Jamali-Rad)
+### Official PyTorch Implementation for ["BECLR: Batch Enhanced Contrastive Few-Shot Learning"](https://openreview.net/forum?id=k9SVcrmXL8)<br> (Stylianos Poulakakis-Daktylidis, Hadi Jamali-Rad)
 * Accepted for **Spotlight** Presentation in ICLR 2024 
 ## Abstract
 Learning quickly from very few labeled samples is a fundamental attribute that separates machines and humans in the era of deep representation learning. Unsupervised few-shot learning (U-FSL) aspires to bridge this gap by discarding the reliance on annotations at training time. Intrigued by the success of contrastive learning approaches in the realm of U-FSL, we structurally approach their shortcomings in both pretraining and downstream inference stages. We propose a novel Dynamic Clustered mEmory (DyCE) module to promote a highly separable latent representation space for enhancing positive sampling at the pretraining phase and infusing implicit class-level insights into unsupervised contrastive learning. We then tackle the, somehow overlooked yet critical, issue of sample bias at the few-shot inference stage. We propose an iterative Optimal Transport-based distribution Alignment (OpTA) strategy and demonstrate that it efficiently addresses the problem, especially in low-shot scenarios where FSL approaches suffer the most from sample bias. We later on discuss that DyCE and OpTA are two intertwined pieces of a novel end-to-end approach (we coin as BECLR), constructively magnifying each other's impact. We then present a suite of extensive quantitative and qualitative experimentation to corroborate that BECLR sets a new state-of-the-art across ALL existing U-FSL benchmarks (to the best of our knowledge), and significantly outperforms the best of the current baselines, e.g. by up to $14$% and $12$% in the ($5$-way, $1$-shot) setting on miniImageNet and tieredImageNet, respectively.
@@ -107,7 +107,7 @@ Corresponding author: Stylianos Poulakakis-Daktylidis (<stypoumic@gmail.com>)
 ## Citation
 ```(bibtex)
 @inproceedings{
-  title={{BECLR}: Batch Enhanced Contrastive Unsupervised Few-Shot Learning},
+  title={{BECLR}: Batch Enhanced Contrastive Few-Shot Learning},
   author={Stylianos Poulakakis-Daktylidis and Hadi Jamali-Rad},
   booktitle={The Twelfth International Conference on Learning Representations},
   year={2024},
