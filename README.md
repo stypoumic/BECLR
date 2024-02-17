@@ -1,5 +1,5 @@
 # Codebase of BECLR
-### Official PyTorch Implementation for ["BECLR: Batch Enhanced Contrastive Few-Shot Learning"](https://openreview.net/forum?id=k9SVcrmXL8)<br> (Stylianos Poulakakis-Daktylidis, Hadi Jamali-Rad)
+### Official Implementation for ["BECLR: Batch Enhanced Contrastive Few-Shot Learning"](https://openreview.net/forum?id=k9SVcrmXL8)<br> (Stylianos Poulakakis-Daktylidis, Hadi Jamali-Rad)
 
 * Accepted for **Spotlight** Presentation in ICLR 2024 
 
