@@ -20,7 +20,7 @@ Learning quickly from very few labeled samples is a fundamental attribute that s
 * **Addressing inherent sample bias in (U-)FSL.** In Few-Shot learning the base (pretraining) and novel (inference) classes are mutually exclusive classes. This distribution shift poses a significant challenge at inference time for the swift adaptation to the novel classes. This is further aggravated due to access to only a few labeled (a.k.a support) samples within the few-shot task since the support samples are typically not representative of the larger unlabeled (a.k.a query) set. We refer to this phenomenon as sample bias, highlighting that it is overlooked by most (U-)FSL baselines. To address this issue, we introduce our OpTA add-on module within the supervised inference step. OpTA imposes no additional learnable parameters, yet efficiently aligns the representations of the labeled support and the unlabeled query sets, right before the final supervised inference step. We demonstrate that these two novel modules (DyCE and OpTA) are actually intertwined and amplify one another. Combining these two key ideas, we propose an end-to-end U-FSL approach coined as Batch-Enhanced Contrastive LeaRning (BECLR).
 
 
-<p align="center">s
+<p align="center">
   <img src="images/opta.png" width="85%" /> 
 </p>
 
