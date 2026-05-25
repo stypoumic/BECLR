@@ -51,57 +51,59 @@ Learning quickly from very few labeled samples is a fundamental attribute that s
 
 ### miniImageNet (5-way classification)
 
-| Method | Backbone | Setting | 1-shot | 5-shot |
-|---|---|---|---:|---:|
-| [C3LR](https://arxiv.org/abs/2202.08149) | Conv4 | Unsup. | 47.92 ± 1.20 | 64.81 ± 1.15 |
-| [SAMPTransfer](https://arxiv.org/abs/2210.06339) | Conv4b | Unsup. | 61.02 ± 1.05 | 72.52 ± 0.68 |
-| [LF2CS](https://www.ecva.net/papers/eccv_2022/papers_ECCV/papers/136910406.pdf) | RN12 | Unsup. | 47.93 ± 0.19 | 66.44 ± 0.17 |
-| [CPNWCP](https://dl.acm.org/doi/10.1007/978-3-031-19800-7_39) | RN18 | Unsup. | 53.14 ± 0.62 | 67.36 ± 0.50 |
-| [SimCLR](https://proceedings.mlr.press/v119/chen20j.html) | RN18 | Unsup. | 62.58 ± 0.37 | 79.66 ± 0.27 |
-| [SwAV†](https://proceedings.neurips.cc/paper/2020/hash/70feb62b69f16e0238f741fab228fec2) | RN18 | Unsup. | 59.84 ± 0.52 | 78.23 ± 0.26 |
-| [NNCLR†](https://openaccess.thecvf.com/content/ICCV2021/html/Dwibedi_With_a_Little_Help_From_My_Friends_Nearest-Neighbor_Contrastive_Learning_ICCV_2021_paper.html) | RN18 | Unsup. | 63.33 ± 0.53 | 80.75 ± 0.25 |
-| [SimSiam](https://openaccess.thecvf.com/content/CVPR2021/html/Chen_Exploring_Simple_Siamese_Representation_Learning_CVPR_2021_paper.html) | RN18 | Unsup. | 62.80 ± 0.37 | 79.85 ± 0.27 |
-| [HMS](https://ieeexplore.ieee.org/document/9786650) | RN18 | Unsup. | 58.20 ± 0.23 | 75.77 ± 0.16 |
-| [Laplacian Eigenmaps](https://arxiv.org/abs/2210.03595) | RN18 | Unsup. | 59.47 ± 0.87 | 78.79 ± 0.58 |
-| [PsCo†](https://arxiv.org/pdf/2303.00996) | RN18 | Unsup. | 47.24 ± 0.76 | 65.48 ± 0.68 |
-| [UniSiam + dist](https://link.springer.com/chapter/10.1007/978-3-031-19800-7_43) | RN18 | Unsup. | 64.10 ± 0.36 | 82.26 ± 0.25 |
-| [Meta-DM + UniSiam + dist∗](https://ieeexplore.ieee.org/document/10647300) | RN18 | Unsup. | 65.64 ± 0.36 | 83.97 ± 0.25 |
-| 🔥 **[BECLR (Ours)](https://arxiv.org/abs/2402.02444)** | RN18 | Unsup. | **75.74 ± 0.62** | **84.93 ± 0.33** |
+| Method | Backbone | 1-shot | 5-shot |
+|---|---|---:|---:|
+| [C3LR](https://arxiv.org/abs/2202.08149) | Conv4 | 47.92 ± 1.20 | 64.81 ± 1.15 |
+| [SAMPTransfer](https://arxiv.org/abs/2210.06339) | Conv4b | 61.02 ± 1.05 | 72.52 ± 0.68 |
+| [LF2CS](https://www.ecva.net/papers/eccv_2022/papers_ECCV/papers/136910406.pdf) | RN12 | 47.93 ± 0.19 | 66.44 ± 0.17 |
+| [CPNWCP](https://dl.acm.org/doi/10.1007/978-3-031-19800-7_39) | RN18 | 53.14 ± 0.62 | 67.36 ± 0.50 |
+| [SimCLR](https://proceedings.mlr.press/v119/chen20j.html) | RN18 | 62.58 ± 0.37 | 79.66 ± 0.27 |
+| [SwAV†](https://proceedings.neurips.cc/paper/2020/hash/70feb62b69f16e0238f741fab228fec2) | RN18 | 59.84 ± 0.52 | 78.23 ± 0.26 |
+| [NNCLR†](https://openaccess.thecvf.com/content/ICCV2021/html/Dwibedi_With_a_Little_Help_From_My_Friends_Nearest-Neighbor_Contrastive_Learning_ICCV_2021_paper.html) | RN18 | 63.33 ± 0.53 | 80.75 ± 0.25 |
+| [SimSiam](https://openaccess.thecvf.com/content/CVPR2021/html/Chen_Exploring_Simple_Siamese_Representation_Learning_CVPR_2021_paper.html) | RN18 | 62.80 ± 0.37 | 79.85 ± 0.27 |
+| [HMS](https://ieeexplore.ieee.org/document/9786650) | RN18 | 58.20 ± 0.23 | 75.77 ± 0.16 |
+| [Laplacian Eigenmaps](https://arxiv.org/abs/2210.03595) | RN18 | 59.47 ± 0.87 | 78.79 ± 0.58 |
+| [PsCo†](https://arxiv.org/pdf/2303.00996) | RN18 | 47.24 ± 0.76 | 65.48 ± 0.68 |
+| [UniSiam + dist](https://link.springer.com/chapter/10.1007/978-3-031-19800-7_43) | RN18 | 64.10 ± 0.36 | 82.26 ± 0.25 |
+| [Meta-DM + UniSiam + dist∗](https://ieeexplore.ieee.org/document/10647300) | RN18 | 65.64 ± 0.36 | 83.97 ± 0.25 |
+| **[BECLR (Ours)](https://arxiv.org/abs/2402.02444)** 🔥 | RN18 | **75.74 ± 0.62** | **84.93 ± 0.33** |
+| **Deeper Backbone (RN50)** |  |  |  |
+| [SwAV†](https://proceedings.neurips.cc/paper/2020/hash/70feb62b69f16e0238f741fab228fec2) | RN50 | 63.34 ± 0.42 | 82.76 ± 0.24 |
+| [NNCLR†](https://openaccess.thecvf.com/content/ICCV2021/html/Dwibedi_With_a_Little_Help_From_My_Friends_Nearest-Neighbor_Contrastive_Learning_ICCV_2021_paper.html) | RN50 | 65.42 ± 0.44 | 83.31 ± 0.21 |
+| [TrainProto](https://arxiv.org/abs/2106.10846) | RN50 | 58.92 ± 0.91 | 73.94 ± 0.63 |
+| [UBC-FSL](https://openaccess.thecvf.com/content/CVPR2021W/LLID/html/Chen_Shot_in_the_Dark_Few-Shot_Learning_With_No_Base-Class_Labels_CVPRW_2021_paper.html) | RN50 | 56.20 ± 0.60 | 75.40 ± 0.40 |
+| [PDA-Net](https://arxiv.org/abs/2105.11874) | RN50 | 63.84 ± 0.91 | 83.11 ± 0.56 |
+| [UniSiam + dist](https://link.springer.com/chapter/10.1007/978-3-031-19800-7_43) | RN50 | 65.33 ± 0.36 | 83.22 ± 0.24 |
+| [Meta-DM + UniSiam + dist∗](https://ieeexplore.ieee.org/abstract/document/10647300) | RN50 | 66.68 ± 0.36 | 85.29 ± 0.23 |
+| **[BECLR (Ours)](https://arxiv.org/abs/2402.02444)** 🔥 | RN50 | **80.57 ± 0.57** | **87.82 ± 0.29** |
 
 ---
 
 ### tieredImageNet (5-way classification)
 
-| Method | Backbone | Setting | 1-shot | 5-shot |
-|---|---|---|---:|---:|
-| [C3LR](https://arxiv.org/abs/2202.08149) | Conv4 | Unsup. | 42.37 ± 0.77 | 61.77 ± 0.25 |
-| [SAMPTransfer](https://arxiv.org/abs/2210.06339) | Conv4b | Unsup. | 49.10 ± 0.94 | 65.19 ± 0.82 |
-| [LF2CS](https://www.ecva.net/papers/eccv_2022/papers_ECCV/papers/136910406.pdf) | RN12 | Unsup. | 53.16 ± 0.66 | 66.59 ± 0.57 |
-| [CPNWCP](https://dl.acm.org/doi/10.1007/978-3-031-19800-7_39) | RN18 | Unsup. | 45.00 ± 0.19 | 62.96 ± 0.19 |
-| [SimCLR](https://proceedings.mlr.press/v119/chen20j.html) | RN18 | Unsup. | 63.38 ± 0.42 | 79.17 ± 0.34 |
-| [SwAV†](https://proceedings.neurips.cc/paper/2020/hash/70feb62b69f16e0238f741fab228fec2) | RN18 | Unsup. | 65.26 ± 0.53 | 81.73 ± 0.24 |
-| [NNCLR†](https://openaccess.thecvf.com/content/ICCV2021/html/Dwibedi_With_a_Little_Help_From_My_Friends_Nearest-Neighbor_Contrastive_Learning_ICCV_2021_paper.html) | RN18 | Unsup. | 65.46 ± 0.55 | 81.40 ± 0.27 |
-| [SimSiam](https://openaccess.thecvf.com/content/CVPR2021/html/Chen_Exploring_Simple_Siamese_Representation_Learning_CVPR_2021_paper.html) | RN18 | Unsup. | 64.05 ± 0.40 | 81.40 ± 0.30 |
-| [HMS](https://ieeexplore.ieee.org/document/9786650) | RN18 | Unsup. | 58.42 ± 0.25 | 75.85 ± 0.18 |
-| [PsCo†](https://arxiv.org/pdf/2303.00996) | RN18 | Unsup. | 54.33 ± 0.54 | 69.73 ± 0.49 |
-| [UniSiam + dist](https://link.springer.com/chapter/10.1007/978-3-031-19800-7_43) | RN18 | Unsup. | 67.01 ± 0.39 | 84.47 ± 0.28 |
-| [Meta-DM + UniSiam + dist∗](https://ieeexplore.ieee.org/document/10647300) | RN18 | Unsup. | 67.11 ± 0.40 | 84.39 ± 0.28 |
-| 🔥 **[BECLR (Ours)](https://arxiv.org/abs/2402.02444)** | RN18 | Unsup. | **76.44 ± 0.66** | **84.85 ± 0.37** |
-
----
-
-### ResNet-50 Results
-
-| Method | Backbone | Setting | mini 1-shot | mini 5-shot | tiered 1-shot | tiered 5-shot |
-|---|---|---|---:|---:|---:|---:|
-| [SwAV†](https://proceedings.neurips.cc/paper/2020/hash/70feb62b69f16e0238f741fab228fec2) | RN50 | Unsup. | 63.34 ± 0.42 | 82.76 ± 0.24 | 68.02 ± 0.52 | 85.93 ± 0.33 |
-| [NNCLR†](https://openaccess.thecvf.com/content/ICCV2021/html/Dwibedi_With_a_Little_Help_From_My_Friends_Nearest-Neighbor_Contrastive_Learning_ICCV_2021_paper.html) | RN50 | Unsup. | 65.42 ± 0.44 | 83.31 ± 0.21 | 69.82 ± 0.54 | 86.41 ± 0.31 |
-| [TrainProto](https://arxiv.org/abs/2106.10846) | RN50 | Unsup. | 58.92 ± 0.91 | 73.94 ± 0.63 | - | - |
-| [UBC-FSL](https://openaccess.thecvf.com/content/CVPR2021W/LLID/html/Chen_Shot_in_the_Dark_Few-Shot_Learning_With_No_Base-Class_Labels_CVPRW_2021_paper.html) | RN50 | Unsup. | 56.20 ± 0.60 | 75.40 ± 0.40 | 66.60 ± 0.70 | 83.10 ± 0.50 |
-| [PDA-Net](https://arxiv.org/abs/2105.11874) | RN50 | Unsup. | 63.84 ± 0.91 | 83.11 ± 0.56 | 69.01 ± 0.93 | 84.20 ± 0.69 |
-| [UniSiam + dist](https://link.springer.com/chapter/10.1007/978-3-031-19800-7_43) | RN50 | Unsup. | 65.33 ± 0.36 | 83.22 ± 0.24 | 69.60 ± 0.38 | 86.51 ± 0.26 |
-| [Meta-DM + UniSiam + dist∗](https://ieeexplore.ieee.org/abstract/document/10647300) | RN50 | Unsup. | 66.68 ± 0.36 | 85.29 ± 0.23 | 69.61 ± 0.38 | 86.53 ± 0.26 |
-| 🔥 **[BECLR (Ours)](https://arxiv.org/abs/2402.02444)** | RN50 | Unsup. | **80.57 ± 0.57** | **87.82 ± 0.29** | **81.69 ± 0.61** | **87.86 ± 0.32** |
+| Method | Backbone | 1-shot | 5-shot |
+|---|---|---:|---:|
+| [C3LR](https://arxiv.org/abs/2202.08149) | Conv4 | 42.37 ± 0.77 | 61.77 ± 0.25 |
+| [SAMPTransfer](https://arxiv.org/abs/2210.06339) | Conv4b | 49.10 ± 0.94 | 65.19 ± 0.82 |
+| [LF2CS](https://www.ecva.net/papers/eccv_2022/papers_ECCV/papers/136910406.pdf) | RN12 | 53.16 ± 0.66 | 66.59 ± 0.57 |
+| [CPNWCP](https://dl.acm.org/doi/10.1007/978-3-031-19800-7_39) | RN18 | 45.00 ± 0.19 | 62.96 ± 0.19 |
+| [SimCLR](https://proceedings.mlr.press/v119/chen20j.html) | RN18 | 63.38 ± 0.42 | 79.17 ± 0.34 |
+| [SwAV†](https://proceedings.neurips.cc/paper/2020/hash/70feb62b69f16e0238f741fab228fec2) | RN18 | 65.26 ± 0.53 | 81.73 ± 0.24 |
+| [NNCLR†](https://openaccess.thecvf.com/content/ICCV2021/html/Dwibedi_With_a_Little_Help_From_My_Friends_Nearest-Neighbor_Contrastive_Learning_ICCV_2021_paper.html) | RN18 | 65.46 ± 0.55 | 81.40 ± 0.27 |
+| [SimSiam](https://openaccess.thecvf.com/content/CVPR2021/html/Chen_Exploring_Simple_Siamese_Representation_Learning_CVPR_2021_paper.html) | RN18 | 64.05 ± 0.40 | 81.40 ± 0.30 |
+| [HMS](https://ieeexplore.ieee.org/document/9786650) | RN18 | 58.42 ± 0.25 | 75.85 ± 0.18 |
+| [PsCo†](https://arxiv.org/pdf/2303.00996) | RN18 | 54.33 ± 0.54 | 69.73 ± 0.49 |
+| [UniSiam + dist](https://link.springer.com/chapter/10.1007/978-3-031-19800-7_43) | RN18 | 67.01 ± 0.39 | 84.47 ± 0.28 |
+| [Meta-DM + UniSiam + dist∗](https://ieeexplore.ieee.org/document/10647300) | RN18 | 67.11 ± 0.40 | 84.39 ± 0.28 |
+| **[BECLR (Ours)](https://arxiv.org/abs/2402.02444)** 🔥 | RN18 | **76.44 ± 0.66** | **84.85 ± 0.37** |
+| **Deeper Backbone (RN50)** |  |  |  |
+| [SwAV†](https://proceedings.neurips.cc/paper/2020/hash/70feb62b69f16e0238f741fab228fec2) | RN50 | 68.02 ± 0.52 | 85.93 ± 0.33 |
+| [NNCLR†](https://openaccess.thecvf.com/content/ICCV2021/html/Dwibedi_With_a_Little_Help_From_My_Friends_Nearest-Neighbor_Contrastive_Learning_ICCV_2021_paper.html) | RN50 | 69.82 ± 0.54 | 86.41 ± 0.31 |
+| [UBC-FSL](https://openaccess.thecvf.com/content/CVPR2021W/LLID/html/Chen_Shot_in_the_Dark_Few-Shot_Learning_With_No_Base-Class_Labels_CVPRW_2021_paper.html) | RN50 | 66.60 ± 0.70 | 83.10 ± 0.50 |
+| [PDA-Net](https://arxiv.org/abs/2105.11874) | RN50 | 69.01 ± 0.93 | 84.20 ± 0.69 |
+| [UniSiam + dist](https://link.springer.com/chapter/10.1007/978-3-031-19800-7_43) | RN50 | 69.60 ± 0.38 | 86.51 ± 0.26 |
+| [Meta-DM + UniSiam + dist∗](https://ieeexplore.ieee.org/abstract/document/10647300) | RN50 | 69.61 ± 0.38 | 86.53 ± 0.26 |
+| **[BECLR (Ours)](https://arxiv.org/abs/2402.02444)** 🔥 | RN50 | **81.69 ± 0.61** | **87.86 ± 0.32** |
 
 ---
 
