@@ -7,20 +7,20 @@
 <!-- PapersWithCode-style SOTA badges for BECLR -->
 
 [![PWC](https://img.shields.io/badge/Papers%20with%20Code-SOTA-success?style=flat-square&logo=read-the-docs)](#unsupervised-few-shot-learning-benchmark)
-![miniImageNet](https://img.shields.io/badge/miniImageNet-5--way%201--shot%20%7C%2075.74%25-blue?style=flat-square)
-![Task](https://img.shields.io/badge/task-unsupervised%20few--shot%20image%20classification-orange?style=flat-square)
+[![miniImageNet 1-shot](https://img.shields.io/badge/miniImageNet-5--way%201--shot%20%7C%2075.74%25-blue?style=flat-square)](#unsupervised-few-shot-learning-benchmark)
+[![Task](https://img.shields.io/badge/task-unsupervised%20few--shot%20image%20classification-orange?style=flat-square)](#unsupervised-few-shot-learning-benchmark)
 
 [![PWC](https://img.shields.io/badge/Papers%20with%20Code-SOTA-success?style=flat-square&logo=read-the-docs)](#unsupervised-few-shot-learning-benchmark)
-![miniImageNet](https://img.shields.io/badge/miniImageNet-5--way%205--shot%20%7C%2084.93%25-blue?style=flat-square)
-![Task](https://img.shields.io/badge/task-unsupervised%20few--shot%20image%20classification-orange?style=flat-square)
+[![miniImageNet 5-shot](https://img.shields.io/badge/miniImageNet-5--way%205--shot%20%7C%2084.93%25-blue?style=flat-square)](#unsupervised-few-shot-learning-benchmark)
+[![Task](https://img.shields.io/badge/task-unsupervised%20few--shot%20image%20classification-orange?style=flat-square)](#unsupervised-few-shot-learning-benchmark)
 
 [![PWC](https://img.shields.io/badge/Papers%20with%20Code-SOTA-success?style=flat-square&logo=read-the-docs)](#unsupervised-few-shot-learning-benchmark)
-![tieredImageNet](https://img.shields.io/badge/tieredImageNet-5--way%201--shot%20%7C%2076.44%25-blueviolet?style=flat-square)
-![Task](https://img.shields.io/badge/task-unsupervised%20few--shot%20image%20classification-orange?style=flat-square)
+[![tieredImageNet 1-shot](https://img.shields.io/badge/tieredImageNet-5--way%201--shot%20%7C%2076.44%25-blueviolet?style=flat-square)](#unsupervised-few-shot-learning-benchmark)
+[![Task](https://img.shields.io/badge/task-unsupervised%20few--shot%20image%20classification-orange?style=flat-square)](#unsupervised-few-shot-learning-benchmark)
 
 [![PWC](https://img.shields.io/badge/Papers%20with%20Code-SOTA-success?style=flat-square&logo=read-the-docs)](#unsupervised-few-shot-learning-benchmark)
-![tieredImageNet](https://img.shields.io/badge/tieredImageNet-5--way%205--shot%20%7C%2084.85%25-blueviolet?style=flat-square)
-![Task](https://img.shields.io/badge/task-unsupervised%20few--shot%20image%20classification-orange?style=flat-square)
+[![tieredImageNet 5-shot](https://img.shields.io/badge/tieredImageNet-5--way%205--shot%20%7C%2084.85%25-blueviolet?style=flat-square)](#unsupervised-few-shot-learning-benchmark)
+[![Task](https://img.shields.io/badge/task-unsupervised%20few--shot%20image%20classification-orange?style=flat-square)](#unsupervised-few-shot-learning-benchmark)
 
 [Benchmark](#unsupervised-few-shot-learning-benchmark) • 
 [miniImageNet](#miniimagenet-5-way-classification) • 
